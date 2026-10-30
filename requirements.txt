@@ -1,0 +1,12 @@
+# Conexión SSH y parsing
+netmiko>=4.4
+ntc-templates>=4.0
+textfsm>=1.1
+
+# Interfaz gráfica y visualización
+streamlit>=1.50
+pandas>=2.0
+pyvis>=0.3.2
+
+# Pruebas
+pytest>=8.0

@@ -1,0 +1,37 @@
+          Mac Address Table
+-------------------------------------------
+
+Vlan    Mac Address       Type        Ports
+----    -----------       --------    -----
+ All    0100.0ccc.cccc    STATIC      CPU
+ All    0100.0ccc.cccd    STATIC      CPU
+ All    0180.c200.0000    STATIC      CPU
+ All    ffff.ffff.ffff    STATIC      CPU
+   1    9020.c2aa.0001    DYNAMIC     Gi1/0/46
+   1    9cdc.71aa.0001    DYNAMIC     Gi1/0/47
+   1    2c7b.a0aa.0001    DYNAMIC     Gi1/0/48
+  10    0050.56a1.0001    DYNAMIC     Gi1/0/1
+  10    0050.56a1.0002    DYNAMIC     Gi1/0/2
+  20    0025.6b4a.1f20    DYNAMIC     Gi1/0/2
+  30    2047.da11.2233    DYNAMIC     Gi1/0/3
+  10    a4bb.6d00.0001    DYNAMIC     Gi1/0/4
+  10    a4bb.6d00.0002    DYNAMIC     Gi1/0/4
+  10    a4bb.6d00.0003    DYNAMIC     Gi1/0/4
+  10    a4bb.6d00.0004    DYNAMIC     Gi1/0/4
+  10    a4bb.6d00.0005    DYNAMIC     Gi1/0/4
+  40    0050.56a1.0005    DYNAMIC     Gi1/0/5
+  10    001b.a9aa.bb01    DYNAMIC     Gi1/0/8
+  99    b40c.25aa.0001    DYNAMIC     Gi1/0/45
+  10    0050.56b2.0001    DYNAMIC     Gi1/0/46
+  10    0050.56b2.0002    DYNAMIC     Gi1/0/46
+  20    0025.6b4a.2001    DYNAMIC     Gi1/0/46
+  10    0050.56c3.0001    DYNAMIC     Gi1/0/47
+  10    0050.56c3.0002    DYNAMIC     Gi1/0/47
+  10    0050.56c3.0003    DYNAMIC     Gi1/0/47
+  30    2047.da11.4455    DYNAMIC     Gi1/0/47
+  10    0050.56d4.0001    DYNAMIC     Gi1/0/48
+  10    0050.56d4.0002    DYNAMIC     Gi1/0/48
+  50    c8f7.50aa.0001    DYNAMIC     Te1/1/1
+  50    c8f7.50aa.0002    DYNAMIC     Te1/1/1
+  50    c8f7.50aa.0003    DYNAMIC     Te1/1/1
+Total Mac Addresses for this criterion: 32

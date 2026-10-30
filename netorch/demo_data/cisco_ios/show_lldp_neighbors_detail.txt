@@ -1,0 +1,100 @@
+------------------------------------------------
+Local Intf: Gi1/0/2
+Chassis id: 10.10.20.15
+Port id: 00256B4A1F20:P1
+Port Description: SW PORT
+System Name: SEP00256B4A1F20
+
+System Description: 
+Cisco IP Phone CP-8845, V3, sip8845_65.14-1-1-0001-120
+
+Time remaining: 162 seconds
+System Capabilities: B,T
+Enabled Capabilities: B,T
+Management Addresses:
+    IP: 10.10.20.15
+Auto Negotiation - supported, enabled
+
+------------------------------------------------
+Local Intf: Gi1/0/3
+Chassis id: 2047.da11.2233
+Port id: 2047.da11.2233
+Port Description: bond0
+System Name: AP-PISO1-01
+
+System Description: 
+ArubaOS (MODEL: 535), Version 8.10.0.6
+
+Time remaining: 101 seconds
+System Capabilities: B,W
+Enabled Capabilities: W
+Management Addresses:
+    IP: 10.10.30.10
+Auto Negotiation - supported, enabled
+
+------------------------------------------------
+Local Intf: Gi1/0/45
+Chassis id: b40c.25aa.0001
+Port id: ethernet1/1
+Port Description: ethernet1/1
+System Name: FW-PALO-MTY
+
+System Description: 
+Palo Alto Networks PA-3220 firewall
+
+Time remaining: 110 seconds
+System Capabilities: R
+Enabled Capabilities: R
+Management Addresses:
+    IP: 10.0.99.2
+
+------------------------------------------------
+Local Intf: Gi1/0/46
+Chassis id: 9020.c2aa.0001
+Port id: 1/1/52
+Port Description: UPLINK-CORE
+System Name: SW-ACC-CX-P3
+
+System Description: 
+Aruba JL658A 6300M 48SR5 CL6 PoE 4SFP56 Swch FL.10.13.1000
+
+Time remaining: 99 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.0.12
+
+------------------------------------------------
+Local Intf: Gi1/0/47
+Chassis id: 9cdc.71aa.0001
+Port id: 49
+Port Description: 49
+System Name: SW-ACC-ARUBA-P1
+
+System Description: 
+Aruba JL256A 2930F-48G-PoE+-4SFP+ Switch, revision WC.16.11.0012
+
+Time remaining: 105 seconds
+System Capabilities: B,R
+Enabled Capabilities: B
+Management Addresses:
+    IP: 10.0.0.11
+
+------------------------------------------------
+Local Intf: Gi1/0/48
+Chassis id: 2c7b.a0aa.0001
+Port id: 1/1/25
+Port Description: Alcatel-Lucent Enterprise 1/1/25
+System Name: OS6860-PISO2
+
+System Description: 
+Alcatel-Lucent Enterprise OS6860E-P24 8.9.221.R03 GA
+
+Time remaining: 108 seconds
+System Capabilities: B,R
+Enabled Capabilities: B,R
+Management Addresses:
+    IP: 10.0.0.13
+
+
+Total entries displayed: 5

@@ -1,0 +1,3 @@
+Interface       IP Address        Interface Status
+                                  link/admin
+vlan1           10.0.0.12/24      up/up

@@ -1,0 +1,17 @@
+Legend: Mac Address: * = address not valid,
+
+        Mac Address: & = duplicate static address,
+
+   Domain    Vlan/SrvcId[:ISId/vnId]    Mac Address           Type          Operation          Interface
+------------+----------------------+-------------------+------------------+-------------+-------------------------
+     VLAN            10               00:50:56:d4:00:01     dynamic            bridging         1/1/1
+     VLAN            10               00:50:56:d4:00:02     dynamic            bridging         1/1/2
+     VLAN            10               00:11:22:33:44:55     dynamic            bridging         1/1/5
+     VLAN            10               3c:52:82:aa:00:01     dynamic            bridging         1/1/8
+     VLAN            10               3c:52:82:aa:00:02     dynamic            bridging         1/1/8
+     VLAN            10               3c:52:82:aa:00:03     dynamic            bridging         1/1/8
+     VLAN            1                00:a6:ca:11:00:01     dynamic            bridging         1/1/25
+     VLAN            10               00:a6:ca:11:00:10     dynamic            bridging         1/1/25
+     VLAN            10               00:50:56:a1:00:01     dynamic            bridging         1/1/25
+
+ Total number of Valid MAC addresses above = 9

@@ -1,0 +1,18 @@
+
+ Internet (IP) Service
+
+  IP Routing : Disabled
+
+  Default Gateway : 10.0.0.1
+  Default TTL     : 64
+  Arp Age         : 20
+  Domain Suffix   :
+  DNS server      :
+
+                       |                                            Proxy ARP
+  VLAN                 | IP Config  IP Address      Subnet Mask     IPv4 IPv6
+  -------------------- + ---------- --------------- --------------- ---- ----
+  DEFAULT_VLAN         | Manual     10.0.0.11       255.255.255.0   No   No
+  USUARIOS             | Disabled
+  VOZ                  | Disabled
+  WIFI-AP              | Disabled

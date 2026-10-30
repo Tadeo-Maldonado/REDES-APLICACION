@@ -1,0 +1,27 @@
+interface 1/1/1
+    no shutdown
+    description PC-01
+    vlan access 10
+interface 1/1/2
+    no shutdown
+    description PC-02
+    vlan access 10
+interface 1/1/3
+    no shutdown
+    description TELEFONO
+    vlan access 20
+interface 1/1/10
+    no shutdown
+    vlan access 10
+interface 1/1/11
+    vlan access 10
+interface 1/1/48
+    no shutdown
+    vlan access 10
+interface 1/1/52
+    no shutdown
+    description UPLINK-CORE
+    vlan trunk native 1
+    vlan trunk allowed 1,10,20,30
+interface vlan1
+    ip address 10.0.0.12/24

@@ -1,0 +1,32 @@
+Remote LLDP nearest-bridge Agents on Local Port 1/1/25:
+
+    Chassis 00:a6:ca:11:00:01, Port Gi1/0/48:
+      Remote ID                   = 3,
+      Chassis Subtype             = 4 (MAC Address),
+      Port Subtype                = 5 (Interface Name),
+      Port Description            = UPLINK OS6860-P2,
+      System Name                 = SW-CORE-MTY,
+      System Description          = Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), Version 17.9.4,
+      Capabilites Supported       = Bridge Router,
+      Capabilites Enabled         = Bridge Router,
+      Management IP Address       = 10.0.0.1,
+      MED Device Type             = Unknown,
+      MED Capabilities            = (null),
+      MED Extension TLVs Present  = (null),
+      Remote port MAC/PHY AutoNeg = Supported Enabled Capable
+
+Remote LLDP nearest-bridge Agents on Local Port 1/1/5:
+
+    Chassis 10.10.10.90, Port 001122334455:
+      Remote ID                   = 7,
+      Chassis Subtype             = 5 (Network Address),
+      Port Subtype                = 3 (MAC Address),
+      Port Description            = (null),
+      System Name                 = srv-backup01,
+      System Description          = Ubuntu 22.04.3 LTS Linux 5.15.0-86-generic x86_64,
+      Capabilites Supported       = Bridge Router Station,
+      Capabilites Enabled         = Station,
+      Management IP Address       = 10.10.10.90,
+      MED Device Type             = Unknown,
+      MED Capabilities            = (null),
+      MED Extension TLVs Present  = (null)

@@ -1,0 +1,31 @@
+-------------------------
+Device ID: SEP00256B4A1F20
+Entry address(es): 
+  IP address: 10.10.20.15
+Platform: Cisco IP Phone 8845,  Capabilities: Host Phone Two-port Mac Relay 
+Interface: GigabitEthernet1/0/2,  Port ID (outgoing port): Port 1
+Holdtime : 162 sec
+Second Port Status: Up
+
+Version :
+sip8845_65.14-1-1-0001-120 
+
+advertisement version: 2
+Duplex: full
+Power drawn: 6.300 Watts
+
+-------------------------
+Device ID: RTR-WAN-MTY.lab.local
+Entry address(es): 
+  IP address: 10.0.44.1
+Platform: cisco ISR4331/K9,  Capabilities: Router IGMP 
+Interface: GigabitEthernet1/0/44,  Port ID (outgoing port): GigabitEthernet0/0/1
+Holdtime : 140 sec
+
+Version :
+Cisco IOS Software [Gibraltar], ISR Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 16.12.4
+
+advertisement version: 2
+Duplex: full
+
+Total cdp entries displayed : 2

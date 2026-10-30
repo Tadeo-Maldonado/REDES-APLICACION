@@ -1,0 +1,7 @@
+Total 2 interfaces
+ Flags (D=Directly-bound)
+
+            Name                 IP Address      Subnet Mask     Status Forward  Device
+--------------------------------+---------------+---------------+------+-------+---------
+Loopback                         127.0.0.1       255.255.255.255     UP      NO Loopback
+MGMT-V1                          10.0.0.13       255.255.255.0       UP      NO vlan 1

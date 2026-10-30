@@ -1,0 +1,36 @@
+
+ LLDP Remote Device Information Detail
+
+  Local Port   : 4
+  ChassisType  : mac-address
+  ChassisId    : 20 47 da 11 44 55
+  PortType     : mac-address
+  PortId       : 20 47 da 11 44 55
+  SysName      : AP-PISO1-02
+  System Descr : ArubaOS (MODEL: 515), Version 8.10.0.6
+  PortDescr    : eth0
+  Pvid         : 30
+
+  System Capabilities Supported  : bridge, wlan-access-point
+  System Capabilities Enabled    : wlan-access-point
+
+  Remote Management Address
+     Type    : ipv4
+     Address : 10.10.30.11
+
+ ------------------------------------------------------------------------------
+  Local Port   : 49
+  ChassisType  : mac-address
+  ChassisId    : 00 a6 ca 11 00 01
+  PortType     : interface-name
+  PortId       : Gi1/0/47
+  SysName      : SW-CORE-MTY
+  System Descr : Cisco IOS Software [Cupertino], Catalyst L3 Switch Software (CAT9K_IOSXE), Version 17.9.4
+  PortDescr    : UPLINK SW-ARUBA-P1
+
+  System Capabilities Supported  : bridge, router
+  System Capabilities Enabled    : bridge, router
+
+  Remote Management Address
+     Type    : ipv4
+     Address : 10.0.0.1

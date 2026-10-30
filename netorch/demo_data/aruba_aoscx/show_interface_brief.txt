@@ -1,0 +1,11 @@
+--------------------------------------------------------------------------------------------------------
+Port      Native  Mode   Type           Enabled Status  Reason                  Speed    Description
+          VLAN                                                                  (Mb/s)
+--------------------------------------------------------------------------------------------------------
+1/1/1     10      access 1GbT           yes     up                              1000     PC-01
+1/1/2     10      access 1GbT           yes     up                              1000     PC-02
+1/1/3     20      access 1GbT           yes     up                              1000     TELEFONO
+1/1/10    10      access 1GbT           yes     down    Waiting for link        --       --
+1/1/11    10      access 1GbT           no      down    Administratively down   --       --
+1/1/48    10      access 1GbT           yes     up                              1000     SERVIDOR-SIN-TRAFICO
+1/1/52    1       trunk  SFP+DA1        yes     up                              10000    UPLINK-CORE

@@ -1,0 +1,13 @@
+
+ Status and Counters - VLAN Information - VLAN 30
+
+  VLAN ID : 30
+  Name : WIFI-AP
+  Status : Port-based
+  Voice : No
+  Jumbo : No
+
+  Port Information Mode     Unknown VLAN Status
+  ---------------- -------- ------------ ----------
+  4                Untagged Learn        Up
+  49               Tagged   Learn        Up
