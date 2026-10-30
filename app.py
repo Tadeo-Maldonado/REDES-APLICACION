@@ -17,7 +17,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from netorch.analysis import diff_runs, enrich_with_project_arp, project_summary
-from netorch.findings import SEVERITY_ICON, severity_counts
+from netorch.faceplate import render_faceplate
+from netorch.findings import SEVERITY_ICON, project_findings, severity_counts
 from netorch.report import (build_report_data, default_export_dir, export_files, open_folder,
                             save_to_folder, slug)
 from netorch.commands import platform_choices, platform_from_text, platform_label
@@ -25,6 +26,7 @@ from netorch.engine import DemoSession, NetmikoSession, Target, run_many
 from netorch.netdiag import AUTO, local_interfaces, probe_many
 from netorch.models import CAT_DOWN
 from netorch.storage import DEFAULT_DB, Storage
+from netorch.utils import normalize_mac
 from netorch.topology import build_graph, render_html
 
 st.set_page_config(page_title="NetOrch · Orquestador de Red", page_icon="🛰️", layout="wide")
@@ -242,9 +244,9 @@ runs = db.list_runs(pid)
 ok_runs = [r for r in runs if r["status"] == "ok"]
 
 st.header(project["name"])
-tab_run, tab_rep, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
-    ["🚀 Nueva ejecución", "📑 Reporte", "📋 Resultados por switch", "🗺️ Topología del proyecto",
-     "🔍 Comparar", "📜 Historial"])
+tab_run, tab_over, tab_rep, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
+    ["🚀 Nueva ejecución", "🧭 Vista general", "📑 Reporte", "📋 Resultados por switch",
+     "🗺️ Topología del proyecto", "🔍 Comparar", "📜 Historial"])
 
 # ======================================================= Nueva ejecución =====
 CHOICES = platform_choices()
@@ -608,6 +610,132 @@ with tab_run:
             } for r in done]), hide_index=True, width="stretch")
             st.subheader("📑 Reporte de esta ejecución")
             report_panel(done, project["name"], f"Ejecución del {batch['when']}", key="post")
+
+# ========================================================== Vista general =====
+def project_snapshot(pid: int):
+    """Última ejecución exitosa de cada switch (con IPs cruzadas) + switches que solo fallaron."""
+    latest = db.latest_runs_per_switch(pid)
+    names = {(r.get("hostname") or r["switch_ip"]).lower() for r in latest}
+    names |= {r["switch_ip"] for r in latest}
+    failed = []
+    for r in db.list_runs(pid):
+        k = (r.get("hostname") or r["switch_ip"]).lower()
+        if r["status"] == "error" and k not in names and r["switch_ip"] not in names:
+            failed.append(r)
+            names |= {k, r["switch_ip"]}
+    data = enrich_with_project_arp(db, [(r, db.get_port_rows(r["id"])) for r in latest])
+    return data, failed
+
+
+def row_matches(r: dict, text: str, mac_norm: str | None) -> bool:
+    if mac_norm and r.get("mac") == mac_norm:
+        return True
+    hay = " ".join(str(r.get(k) or "") for k in ("port", "name", "ip", "mac", "vlan",
+                                                  "device_type", "platform")).lower()
+    compact = hay.replace(":", "").replace(".", "").replace("-", "")
+    t = text.lower()
+    return t in hay or (len(t) >= 4 and t.replace(":", "").replace(".", "").replace("-", "") in compact)
+
+
+def switch_card(run: dict, rows: list[dict], alerts: dict[str, int], hide_down: bool, key: str):
+    name = run.get("hostname") or run["switch_ip"]
+    s = run.get("summary") or {}
+    with st.container(border=True):
+        h1, h2 = st.columns([3, 2])
+        h1.markdown(f"#### 🟦 {name}")
+        h1.caption(f"{run['switch_ip']} · {platform_label(run['platform']).split(' (')[0]} · "
+                   f"{run['started_at'].replace('T', ' ')[:16]}")
+        badges = []
+        for sev, color in (("Alta", "red"), ("Media", "orange")):
+            if alerts.get(sev):
+                badges.append(f":{color}-badge[{alerts[sev]} {sev.lower()}]")
+        h2.markdown(" ".join(badges) or ":green-badge[Sin alertas]")
+        m = st.columns(4)
+        m[0].metric("Puertos activos", f"{s.get('puertos_activos', 0)}/{s.get('puertos_total', 0)}")
+        m[1].metric("Hosts", s.get("hosts", 0))
+        m[2].metric("Vecinos", s.get("vecinos_infra", 0))
+        m[3].metric("No admin.", s.get("uplinks_no_admin", 0))
+        st.html('<div style="overflow-x:auto">' + render_faceplate(rows) + "</div>")
+        ups = [r for r in rows if r["category"] == "Vecino Directo de Infraestructura"
+               and r["device_type"] in ("Switch", "Router", "Firewall")]
+        if ups:
+            st.caption("Conectado a: " + " · ".join(
+                f"**{r['name']}** ({r['port']}{' ↔ ' + r['remote_port'] if r['remote_port'] else ''})"
+                for r in ups))
+        visible = [r for r in rows if not (hide_down and r["category"] == CAT_DOWN)]
+        with st.expander(f"Ver puertos ({len(visible)})"):
+            st.dataframe(rows_df(visible), hide_index=True, width="stretch", key=f"{key}_df")
+
+
+with tab_over:
+    data, failed = project_snapshot(pid)
+    if not data and not failed:
+        st.info("Aún no hay switches recolectados en este proyecto. Ejecuta uno o varios en "
+                "«🚀 Nueva ejecución» (o prueba el modo demo).")
+    else:
+        all_rows = [{**r, "switch": run.get("hostname") or run["switch_ip"]}
+                    for run, rows in data for r in rows]
+        findings = project_findings(data, failed)
+        ps = project_summary(db, pid)
+        m = st.columns(6)
+        m[0].metric("Switches", f"{len(data)}" + (f" (+{len(failed)} ❌)" if failed else ""))
+        m[1].metric("Puertos activos", f"{ps['puertos_activos']}/{ps['puertos_total']}")
+        m[2].metric("Hosts únicos", ps["hosts_unicos"])
+        m[3].metric("Enlaces infra", ps["enlaces_infra"])
+        m[4].metric("No administrados", ps["uplinks_no_admin"])
+        sev = severity_counts(findings)
+        m[5].metric("Alertas altas / medias", f"{sev['Alta']} / {sev['Media']}")
+
+        # Buscador global: ¿dónde está esta MAC / IP / equipo?
+        q = st.text_input("🔎 Buscar en todos los switches", key="global_search",
+                          placeholder="MAC (cualquier formato), IP, nombre, puerto o VLAN…")
+        if q.strip():
+            mac_norm = normalize_mac(q)
+            hits = [r for r in all_rows if row_matches(r, q.strip(), mac_norm)]
+            st.caption(f"{len(hits)} coincidencia(s)")
+            if hits:
+                st.dataframe(rows_df(hits, with_switch=True), hide_index=True, width="stretch")
+
+        c1, c2, c3 = st.columns([2, 1, 1])
+        order = c1.radio("Ordenar", ["Por nombre", "Más alertas primero", "Más hosts primero"],
+                         horizontal=True, key="over_order", label_visibility="collapsed")
+        cols_n = c2.selectbox("Columnas", [1, 2, 3], index=1, key="over_cols",
+                              format_func=lambda n: f"{n} columna{'s' if n > 1 else ''}",
+                              label_visibility="collapsed")
+        hide_down = c3.toggle("Ocultar inactivos en tablas", value=True, key="over_hide")
+
+        alerts_by_sw: dict[str, dict[str, int]] = {}
+        for f in findings:
+            for sw in [x.strip() for x in (f.switch or "").split("/") if x.strip()]:
+                alerts_by_sw.setdefault(sw, {}).setdefault(f.severity, 0)
+                alerts_by_sw[sw][f.severity] += 1
+
+        def sw_name(item):
+            return item[0].get("hostname") or item[0]["switch_ip"]
+
+        cards = list(data)
+        if order == "Más alertas primero":
+            cards.sort(key=lambda it: (-alerts_by_sw.get(sw_name(it), {}).get("Alta", 0),
+                                       -alerts_by_sw.get(sw_name(it), {}).get("Media", 0),
+                                       sw_name(it)))
+        elif order == "Más hosts primero":
+            cards.sort(key=lambda it: (-(it[0].get("summary") or {}).get("hosts", 0), sw_name(it)))
+        else:
+            cards.sort(key=sw_name)
+
+        for r in failed:
+            st.error(f"❌ **{r.get('hostname') or r['switch_ip']}** ({r['switch_ip']}) no se pudo "
+                     f"recolectar: {r.get('error')}")
+        grid = st.columns(cols_n)
+        for i, (run, rows) in enumerate(cards):
+            with grid[i % cols_n]:
+                switch_card(run, rows, alerts_by_sw.get(sw_name((run, rows)), {}), hide_down,
+                            key=f"card_{run['id']}")
+
+        with st.expander("🧾 Tabla de todos los switches juntos"):
+            vis = [r for r in all_rows if not (hide_down and r["category"] == CAT_DOWN)]
+            st.dataframe(rows_df(vis, with_switch=True), hide_index=True, width="stretch",
+                         height=480)
 
 # ================================================================ Reporte =====
 with tab_rep:

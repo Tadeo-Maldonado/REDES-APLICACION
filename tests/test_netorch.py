@@ -416,3 +416,20 @@ def test_no_user_target_and_fallback(monkeypatch):
                               password="x", no_user=True))
     assert calls == ["", NO_USER_FALLBACK] and s.hostname() == "SW1"
     assert any("usuario genérico" in w for w in s.warnings)
+
+
+# ------------------------------------------------------------ vista general --
+def test_faceplate_one_cell_per_physical_port(db):
+    from netorch.faceplate import port_cells, render_faceplate
+    pid = _project(db)
+    core = next(r for r in db.latest_runs_per_switch(pid) if r["hostname"] == "SW-CORE-MTY")
+    rows = db.get_port_rows(core["id"])
+    cells = {c["port"]: c for c in port_cells(rows)}
+    assert len(cells) == len({r["port"] for r in rows})          # teléfono+PC = un solo puerto
+    assert cells["Gi1/0/2"]["style"] == "Phone" and "PC / Host" in cells["Gi1/0/2"]["tip"]
+    assert cells["Gi1/0/4"]["style"] == CAT_UNMANAGED
+    assert cells["Gi1/0/7"]["style"] == "disabled"
+    html = render_faceplate(rows)
+    assert html.count('class="fp-p"') == len(cells) and "<script" not in html
+    evil = [{**rows[0], "name": '"><img src=x onerror=alert(1)>'}]
+    assert "<img" not in render_faceplate(evil)
