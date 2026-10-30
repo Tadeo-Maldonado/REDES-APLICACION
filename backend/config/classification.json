@@ -1,0 +1,16 @@
+{
+  "default": "PC",
+  "rules": [
+    {
+      "type": "FW",
+      "keywords": ["fortigate", "palo alto", "pan-os", "cisco asa", "firepower", "sophos", "checkpoint", "pfsense", "sonicwall"],
+      "name_regex": ["(^|[-_])(fw|fgt|firewall)([-_0-9]|$)"]
+    },
+    {
+      "type": "SW",
+      "keywords": ["switch", "omniswitch", "catalyst", "arubaos", "alcatel-lucent enterprise os"],
+      "name_regex": ["^(sw|switch)[-_]"],
+      "capabilities": ["B"]
+    }
+  ]
+}

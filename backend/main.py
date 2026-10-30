@@ -1,30 +1,45 @@
-"""API: consulta un switch por SSH. No hace escaneos y NO guarda datos de los switches.
+"""API REDES-APLICACION. Lee switches por SSH (o datos demo). No escanea la red
+y no guarda datos de los switches: las credenciales llegan en cada petición y se descartan.
 
-Los datos de conexión (host, usuario, contraseña) llegan en cada petición,
-se usan solo en memoria y se descartan.
-
-Ejecutar desde la carpeta backend:  uvicorn main:app --reload
+Ejecutar desde esta carpeta:  uvicorn main:app --reload   ->  http://localhost:8000
 """
-from fastapi import FastAPI, HTTPException
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from collectors import COLLECTORS
+from core.collector import collect_all
+from drivers import list_drivers
 
 app = FastAPI(title="REDES-APLICACION")
 
 
-class SwitchRequest(BaseModel):
+class SwitchSpec(BaseModel):
     name: str
-    host: str
-    vendor: str      # cisco | aruba | alcatel
-    username: str
-    password: str
+    vendor: str                 # id de un driver: ver GET /api/vendors
+    host: str = ""
+    username: str = ""
+    password: str = ""
+    port: int = 22
+    demo: bool = False          # True = usa datos de muestra, sin conectarse
 
 
-@app.post("/api/connections")
-def connections(sw: SwitchRequest):
-    """Qué hay conectado (PC / SW / FW) y su MAC, por puerto."""
-    if sw.vendor not in COLLECTORS:
-        raise HTTPException(400, f"Vendor no soportado: {sw.vendor}")
-    collector = COLLECTORS[sw.vendor](sw.model_dump())
-    return [c.to_dict() for c in collector.collect()]
+class CollectRequest(BaseModel):
+    switches: list[SwitchSpec]
+
+
+@app.get("/api/vendors")
+def vendors():
+    return list_drivers()
+
+
+@app.post("/api/collect")
+def collect(req: CollectRequest):
+    """Qué hay conectado en cada switch: PC / SW / FW por MAC y puerto."""
+    return {"results": collect_all(req.switches)}
+
+
+FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+if FRONTEND.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")

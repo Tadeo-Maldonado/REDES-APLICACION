@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REDES-APLICACION</title>
+<style>
+  :root { --bg:#14161a; --card:#1d2026; --line:#2e333b; --txt:#e6e8eb; --mut:#8a919c;
+          --pc:#4c9aff; --sw:#3ecf8e; --fw:#ff6b6b; --acc:#4c9aff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:12px; }
+  header h1 { margin:0; font-size:18px; } header span { color:var(--mut); }
+  main { padding:20px 24px; display:grid; gap:20px; max-width:1300px; margin:auto; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  h2 { margin:0 0 12px; font-size:14px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  .sw-row { display:grid; grid-template-columns:1.2fr 1fr 1.2fr 1fr 1fr 70px auto auto; gap:8px; margin-bottom:8px; align-items:center; }
+  input, select, button { background:#14161a; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:7px 9px; font:inherit; min-width:0; }
+  button { cursor:pointer; } button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#06121f; font-weight:600; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .hint { color:var(--mut); font-size:12px; }
+  .stats { display:flex; gap:12px; flex-wrap:wrap; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:8px 14px; min-width:90px; }
+  .stat b { display:block; font-size:22px; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; margin-right:6px; border:1px solid var(--line); }
+  .chip.ok { color:var(--sw); } .chip.err { color:var(--fw); }
+  table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:500; font-size:12px; text-transform:uppercase; }
+  td.mono { font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  .badge { padding:2px 8px; border-radius:5px; font-weight:600; font-size:12px; color:#06121f; }
+  .badge.PC { background:var(--pc); } .badge.SW { background:var(--sw); } .badge.FW { background:var(--fw); }
+  tr.up td { opacity:.55; }
+  .desc { color:var(--mut); font-size:12px; max-width:340px; }
+</style>
+</head>
+<body>
+<header><h1>REDES-APLICACION</h1><span>Qué hay conectado en cada switch (PC · SW · FW)</span></header>
+<main>
+  <section>
+    <h2>Switches a consultar</h2>
+    <div id="rows"></div>
+    <div class="bar">
+      <button id="add">+ Agregar switch</button>
+      <button id="demo">Cargar demo</button>
+      <button id="run" class="primary">Consultar</button>
+      <span class="hint">Las credenciales solo se envían al backend en cada consulta; no se guardan.</span>
+    </div>
+  </section>
+
+  <section id="resultSec" hidden>
+    <h2>Resultado</h2>
+    <div id="status" style="margin-bottom:12px"></div>
+    <div class="stats" id="stats"></div>
+    <div class="bar">
+      <select id="fKind"><option value="">Todos los tipos</option><option>PC</option><option>SW</option><option>FW</option></select>
+      <select id="fSwitch"><option value="">Todos los switches</option></select>
+      <input id="fText" placeholder="Buscar MAC, puerto, nombre…" size="28">
+      <label class="hint"><input type="checkbox" id="fUp"> mostrar equipos detrás de un uplink</label>
+    </div>
+    <table style="margin-top:12px">
+      <thead><tr><th>Switch</th><th>Puerto</th><th>MAC</th><th>VLAN</th><th>Tipo</th><th>Nombre</th><th>Descripción</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+let vendors = [], switches = [], data = [];
+const $ = id => document.getElementById(id);
+
+async function init() {
+  vendors = await (await fetch('/api/vendors')).json();
+  switches = [blank()];
+  renderRows();
+}
+const blank = () => ({ name:'', vendor: vendors[0]?.id || '', host:'', username:'', password:'', port:22, demo:false });
+
+function renderRows() {
+  const box = $('rows'); box.replaceChildren();
+  switches.forEach((s, i) => {
+    const row = document.createElement('div'); row.className = 'sw-row';
+    const inp = (key, ph, type='text') => {
+      const i_ = document.createElement('input'); i_.type = type; i_.placeholder = ph; i_.value = s[key];
+      i_.disabled = s.demo && ['host','username','password','port'].includes(key);
+      i_.oninput = () => s[key] = key === 'port' ? +i_.value : i_.value; return i_;
+    };
+    const sel = document.createElement('select');
+    vendors.forEach(v => sel.add(new Option(v.label, v.id, false, v.id === s.vendor)));
+    sel.onchange = () => s.vendor = sel.value;
+    const chk = document.createElement('label'); chk.className = 'hint';
+    const c = document.createElement('input'); c.type = 'checkbox'; c.checked = s.demo;
+    c.onchange = () => { s.demo = c.checked; renderRows(); };
+    chk.append(c, ' demo');
+    const del = document.createElement('button'); del.textContent = '✕';
+    del.onclick = () => { switches.splice(i, 1); if (!switches.length) switches.push(blank()); renderRows(); };
+    row.append(inp('name','Nombre'), sel, inp('host','IP / host'), inp('username','Usuario'), inp('password','Contraseña','password'), inp('port','Puerto','number'), chk, del);
+    box.append(row);
+  });
+}
+
+$('add').onclick = () => { switches.push(blank()); renderRows(); };
+$('demo').onclick = () => {
+  switches = vendors.map(v => ({ ...blank(), name:`DEMO-${v.id.toUpperCase()}`, vendor:v.id, demo:true }));
+  renderRows();
+};
+$('run').onclick = async () => {
+  const btn = $('run'); btn.disabled = true; btn.textContent = 'Consultando…';
+  try {
+    const res = await fetch('/api/collect', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ switches: switches.filter(s => s.name) }) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { results } = await res.json();
+    showResults(results);
+  } catch (e) { alert('Error: ' + e.message); }
+  btn.disabled = false; btn.textContent = 'Consultar';
+};
+
+function showResults(results) {
+  $('resultSec').hidden = false;
+  data = results.flatMap(r => r.connections);
+  $('status').replaceChildren(...results.map(r => {
+    const s = document.createElement('span'); s.className = 'chip ' + (r.ok ? 'ok' : 'err');
+    s.textContent = r.ok ? `✓ ${r.switch}` : `✗ ${r.switch}: ${r.error}`; return s;
+  }));
+  const f = $('fSwitch'); f.replaceChildren(new Option('Todos los switches', ''));
+  results.forEach(r => f.add(new Option(r.switch, r.switch)));
+  render();
+}
+
+function render() {
+  const kind = $('fKind').value, sw = $('fSwitch').value, q = $('fText').value.toLowerCase(), up = $('fUp').checked;
+  const rows = data.filter(c => (!kind || c.kind === kind) && (!sw || c.switch === sw) && (up || !c.via_uplink) &&
+    (!q || [c.mac, c.port, c.name, c.description, c.switch].join(' ').toLowerCase().includes(q)));
+  const count = k => data.filter(c => c.kind === k && !c.via_uplink).length;
+  $('stats').replaceChildren(...[['PC', count('PC')], ['SW', count('SW')], ['FW', count('FW')]].map(([k, n]) => {
+    const d = document.createElement('div'); d.className = 'stat';
+    const b = document.createElement('b'); b.textContent = n; d.append(b, k === 'PC' ? 'PCs / endpoints' : k === 'SW' ? 'Switches' : 'Firewalls'); return d;
+  }));
+  $('tbody').replaceChildren(...rows.map(c => {
+    const tr = document.createElement('tr'); if (c.via_uplink) tr.className = 'up';
+    const cell = (txt, cls) => { const td = document.createElement('td'); td.textContent = txt ?? ''; if (cls) td.className = cls; return td; };
+    const badge = document.createElement('td'); const b = document.createElement('span'); b.className = 'badge ' + c.kind; b.textContent = c.kind; badge.append(b);
+    tr.append(cell(c.switch), cell(c.port, 'mono'), cell(c.mac, 'mono'), cell(c.vlan), badge, cell(c.name), cell(c.description, 'desc'));
+    return tr;
+  }));
+}
+['fKind','fSwitch','fText','fUp'].forEach(id => $(id).addEventListener('input', render));
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+Remote LLDP nearest-bridge Agents on Local Port 1/1/24:
+    Chassis e8:e7:32:00:00:01, Port 1/1/48:
+      Remote ID                   = 1;
+      Chassis Subtype             = 4 (MAC Address),
+      Port Subtype                = 7 (Locally assigned),
+      Port Description            = Alcatel-Lucent 1/1/48,
+      System Name                 = SW-DIST-ALE,
+      System Description          = Alcatel-Lucent Enterprise OS6860E-P48 8.9.221.R03 GA,
+      System Capabilities         = bridge router,
+      Management IP Address       = 10.0.0.9,

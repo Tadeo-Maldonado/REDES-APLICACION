@@ -1,6 +1,9 @@
-# Servidor API
+# API
 fastapi>=0.115
 uvicorn[standard]>=0.30
 
-# Conexión SSH a los switches (Cisco, Aruba, Alcatel)
+# SSH a los switches (solo se usa fuera del modo demo)
 netmiko>=4.4
+
+# Opcional: nombre del fabricante a partir de la MAC (activar con OUI_LOOKUP=1)
+# mac-vendor-lookup>=0.1.12

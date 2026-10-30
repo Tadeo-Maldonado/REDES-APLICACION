@@ -1,0 +1,10 @@
+ Status and Counters - Port Address Table
+
+  MAC Address   Port  VLAN
+  ------------- ----- ----
+  6c3b6b-100001 3     10
+  a0481c-100002 4     10
+  3c52a1-100003 5     10
+  a4badb-c02000 24    10
+  6c3b6b-100005 24    10
+  6c3b6b-100006 24    10
