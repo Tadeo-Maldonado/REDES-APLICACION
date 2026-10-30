@@ -167,3 +167,45 @@ def test_device_names_are_escaped():
     g = Graph()
     g.node("x", "<script>alert(1)</script>", "Switch", title="</script>")
     assert "<script>alert(1)" not in render_html(g)
+
+
+# ---------------------------------------------- OS6860 / LAG / multi-switch --
+def test_os6860_link_status_and_linkagg(db):
+    run, ports = demo_run(db, db.create_project("p"), "alcatel_aos", "10.0.0.13")
+    # 'show interfaces alias' da el estado real y AOS 8 pone las MACs del uplink en 0/1
+    assert "0/1" not in ports                                  # absorbido por el uplink
+    up = ports["1/1/25"][0]
+    assert up["name"] == "SW-CORE-MTY" and up["mac_count"] == 3 and up["vlan"] == "N:1 T:10,20"
+    assert ports["1/1/26"][0]["category"] == "Miembro de LAG / Port-channel"
+    assert ports["1/1/4"][0]["status"] == "disabled"
+
+
+def test_cisco_port_channel_absorbed():
+    from netorch.parsers.cisco import parse_lags
+    lags = parse_lags("1      Po1(SU)         LACP      Gi1/0/47(P)     Gi1/0/48(P)\n")
+    assert lags == {"Po1": ["Gi1/0/47", "Gi1/0/48"]}
+    data = ParsedData(
+        lags=lags,
+        neighbors=[Neighbor("Gi1/0/47", "SW-DIST", "LLDP", capabilities=["Switch"])],
+        macs=[MacEntry(f"00:00:00:00:03:{i:02x}", "Po1", 10) for i in range(30)],
+    )
+    rows = {r.port: r for r in build_port_map(data)}
+    assert "Po1" not in rows                      # las 30 MACs no se reportan como hub
+    assert rows["Gi1/0/47"].category == CAT_INFRA and rows["Gi1/0/47"].mac_count == 30
+    assert rows["Gi1/0/48"].category == "Miembro de LAG / Port-channel"
+
+
+def test_run_many_parallel_isolates_failures(db):
+    from netorch.engine import run_many
+    pid = db.create_project("multi")
+    targets = [Target(host=ip, platform=plat, username="t", name=f"SW{i + 1}")
+               for i, (plat, ip) in enumerate(DEMOS)]
+    targets.append(Target(host="10.9.9.9", platform="cisco_nxos", username="t", name="SW-SIN-DEMO"))
+    seen = []
+    ids = run_many(db, pid, targets, ["show version"], session_factory=DemoSession,
+                   progress=lambda i, msg, frac: seen.append(i), max_workers=3)
+    runs = [db.get_run(i) for i in ids]
+    assert [r["status"] for r in runs] == ["ok"] * 4 + ["error"]   # uno falla, los demás siguen
+    assert runs[4]["hostname"] == "SW-SIN-DEMO"
+    assert set(seen) == set(range(5))
+    assert len(db.latest_runs_per_switch(pid)) == 4

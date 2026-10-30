@@ -10,8 +10,8 @@ Legend: Mac Address: * = address not valid,
      VLAN            10               3c:52:82:aa:00:01     dynamic            bridging         1/1/8
      VLAN            10               3c:52:82:aa:00:02     dynamic            bridging         1/1/8
      VLAN            10               3c:52:82:aa:00:03     dynamic            bridging         1/1/8
-     VLAN            1                00:a6:ca:11:00:01     dynamic            bridging         1/1/25
-     VLAN            10               00:a6:ca:11:00:10     dynamic            bridging         1/1/25
-     VLAN            10               00:50:56:a1:00:01     dynamic            bridging         1/1/25
+     VLAN            1                00:a6:ca:11:00:01     dynamic            bridging         0/1
+     VLAN            10               00:a6:ca:11:00:10     dynamic            bridging         0/1
+     VLAN            10               00:50:56:a1:00:01     dynamic            bridging         0/1
 
  Total number of Valid MAC addresses above = 9

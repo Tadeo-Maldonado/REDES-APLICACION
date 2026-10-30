@@ -32,6 +32,7 @@ PLATFORMS: dict[str, Platform] = {
             "trunks": ["show interfaces trunk"],
             "vlans": ["show vlan brief"],
             "svis": ["show ip interface brief"],
+            "lags": ["show etherchannel summary"],
         },
     ),
     "cisco_nxos": Platform(
@@ -46,6 +47,7 @@ PLATFORMS: dict[str, Platform] = {
             "trunks": ["show interface trunk"],
             "vlans": ["show vlan brief"],
             "svis": ["show ip interface brief vrf all", "show ip interface brief"],
+            "lags": ["show port-channel summary"],
         },
     ),
     "aruba_aoss": Platform(
@@ -60,6 +62,7 @@ PLATFORMS: dict[str, Platform] = {
             # Se ejecuta "show vlans <id>" por cada VLAN para saber tagged/untagged
             "vlan_detail": ["show vlans {vlan}"],
             "svis": ["show ip"],
+            "lags": ["show trunks"],
         },
     ),
     "aruba_aoscx": Platform(
@@ -76,16 +79,19 @@ PLATFORMS: dict[str, Platform] = {
         },
     ),
     "alcatel_aos": Platform(
-        key="alcatel_aos", label="Alcatel-Lucent Enterprise AOS (6/8)", vendor="alcatel",
+        key="alcatel_aos", label="Alcatel-Lucent Enterprise AOS 6/8 (OS6860, OS6900, OS6560…)", vendor="alcatel",
         netmiko_type="alcatel_aos", textfsm_platform="alcatel_aos",
         commands={
             "neighbors_lldp": ["show lldp remote-system"],
             "mac": ["show mac-address-table", "show mac-learning"],
             "arp": ["show arp"],
             "interfaces": ["show interfaces status"],
+            # Estado real del enlace (up/down) y descripción: status no lo muestra en AOS 8
+            "link_status": ["show interfaces alias"],
             "vlans": ["show vlan"],
             "vlan_ports": ["show vlan members", "show vlan port"],
             "svis": ["show ip interface"],
+            "lags": ["show linkagg port"],
         },
     ),
 }

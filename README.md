@@ -30,7 +30,7 @@ usando salidas de ejemplo, para explorar todas las vistas. También puedes marca
 | Sección | Contenido |
 |---|---|
 | **Proyectos** (barra lateral) | Crear, alternar y borrar proyectos. Cada proyecto acumula sus ejecuciones de forma aislada. |
-| **🚀 Nueva ejecución** | IP, vendor/OS, puerto SSH, usuario, contraseña, enable, llave privada opcional y **Custom CLI** (comandos extra, uno por línea). |
+| **🚀 Nueva ejecución** | Tabla de **varios switches** (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
 | **📋 Resultados** | Las 4 capas: **Resumen ejecutivo** (switch + acumulado del proyecto), **Tabla consolidada de mapeo**, **Topología** interactiva y **Raw logs** (auditoría, descargables). Además VLANs/SVIs. |
 | **🗺️ Topología del proyecto** | Une la última ejecución de cada switch en un solo diagrama: si un switch escaneado aparece como vecino de otro, se "cosen" por IP de gestión o hostname. |
 | **🔍 Comparar** | Diferencias entre dos ejecuciones: equipos nuevos/desaparecidos, puertos que cambiaron de estado y hosts que se movieron de puerto. |
@@ -58,13 +58,30 @@ Implementada en `netorch/classifier.py`, por puerto:
 
 Las MACs aprendidas en los uplinks (las de toda la red) nunca aparecen como hosts.
 
+**LAG / Port-channel / linkagg:** las MACs de un uplink agregado se aprenden en el puerto
+lógico (`Po1`, `Trk1`, `lag1`, `0/1` en Alcatel) y CDP/LLDP se ve en los físicos. Si un
+miembro tiene vecino, las MACs del LAG se le asignan a ese uplink (no aparecen como hub ni
+como hosts) y los demás miembros se marcan como *Miembro de LAG*.
+
 Detalles por vendor:
 - Aruba AOS-S y Alcatel no tienen "modo trunk" explícito: un puerto con VLAN untagged y
   **una sola** VLAN tagged (típicamente voz) se trata como acceso; con 2+ tagged es trunk.
-- Alcatel AOS no muestra el estado operativo en `show interfaces status`; se deduce de la
-  velocidad detectada.
+- Alcatel AOS 8 (OS6860, OS6900, OS6560…) no muestra el estado del enlace en
+  `show interfaces status`; se toma de `show interfaces alias` (que también trae la
+  descripción) y, si no está, se deduce de la velocidad detectada.
 - Cada comando tiene alternativas (p. ej. `show mac-address-table` → `show mac-learning`
   en AOS 8); si una falla por sintaxis se intenta la siguiente y ambas quedan en los Raw logs.
+
+### Comandos por plataforma
+
+| Dato | Cisco IOS/XE | Cisco NX-OS | Aruba AOS-S | Aruba AOS-CX | Alcatel AOS 6/8 (OS6860) |
+|---|---|---|---|---|---|
+| Vecinos | `show cdp neighbors detail`, `show lldp neighbors detail` | igual | `show lldp info remote-device detail` | `show lldp neighbor-info detail` | `show lldp remote-system` |
+| MAC | `show mac address-table` | `show mac address-table` | `show mac-address` | `show mac-address-table` | `show mac-address-table` → `show mac-learning` (AOS 8) |
+| ARP | `show ip arp` | `show ip arp vrf all` | `show arp` | `show arp all-vrfs` | `show arp` |
+| Puertos | `show interfaces status`, `show interfaces trunk` | `show interface status`, `show interface trunk` | `show interfaces brief` | `show interface brief`, `show running-config interface` | `show interfaces status`, `show interfaces alias` |
+| VLANs / SVIs | `show vlan brief`, `show ip interface brief` | ídem + `vrf all` | `show vlans`, `show vlans <id>`, `show ip` | `show vlan`, `show ip interface brief` | `show vlan`, `show vlan members` → `show vlan port` (AOS 6), `show ip interface` |
+| LAG | `show etherchannel summary` | `show port-channel summary` | `show trunks` | (de la configuración `lag N`) | `show linkagg port` |
 
 ## Estructura
 
@@ -72,7 +89,7 @@ Detalles por vendor:
 app.py                     Interfaz gráfica (Streamlit)
 netorch/
   commands.py              Plataformas y comandos por vendor (con alternativas)
-  engine.py                SSH con Netmiko (o sesión demo), ejecución y guardado
+  engine.py                SSH con Netmiko (o sesión demo), ejecución en paralelo y guardado
   parsers/
     cisco.py aruba.py alcatel.py   Parsers RegEx propios por vendor
     common.py              Utilidades + fallback a NTC-Templates (TextFSM)

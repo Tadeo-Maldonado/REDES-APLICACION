@@ -2,10 +2,10 @@
 --------+---------+---------+---------
    1      1/1/3   default   inactive
    1      1/1/4   default   blocking
-   1      1/1/25  default   forwarding
+   1      0/1     default   forwarding
    10     1/1/1   default   forwarding
    10     1/1/2   default   forwarding
    10     1/1/5   default   forwarding
    10     1/1/8   default   forwarding
-   10     1/1/25  qtagged   forwarding
-   20     1/1/25  qtagged   forwarding
+   10     0/1     qtagged   forwarding
+   20     0/1     qtagged   forwarding

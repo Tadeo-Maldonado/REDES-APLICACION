@@ -203,6 +203,29 @@ def parse_svis(text: str, vlans: dict[int, Vlan]) -> None:
             vlans.setdefault(vid, Vlan(vlan_id=vid)).svi_ip = m.group(2)
 
 
+def parse_lags(text: str) -> dict[str, list[str]]:
+    """'show etherchannel summary' (IOS) / 'show port-channel summary' (NX-OS).
+
+    Ej.:  1      Po1(SU)         LACP      Gi1/0/47(P)  Gi1/0/48(P)
+    Los miembros pueden continuar en la línea siguiente.
+    """
+    lags: dict[str, list[str]] = {}
+    current = None
+    for line in (text or "").splitlines():
+        m = re.search(r"\b(Po\d+)\(\w+\)", line)
+        if m:
+            current = normalize_port(m.group(1))
+            lags[current] = []
+        elif not (current and line[:1].isspace() and line.strip()):
+            current = None          # encabezados, líneas en blanco, etc.
+            continue
+        for tok in line.split():
+            mm = re.match(r"^([A-Za-z]+[\d/.:]+)\((\w+)\)$", tok)
+            if mm and not tok.startswith("Po"):
+                lags[current].append(normalize_port(mm.group(1)))
+    return {k: v for k, v in lags.items() if v}
+
+
 def _textfsm_neighbors(platform: str, command: str, text: str, proto: str) -> list[Neighbor]:
     out = []
     for r in textfsm_parse(platform, command, text):
@@ -235,6 +258,7 @@ def parse(outputs: dict[str, str], platform: str) -> ParsedData:
     parse_trunks(outputs.get("trunks", ""), data.interfaces)
     data.vlans = parse_vlans(outputs.get("vlans", ""))
     parse_svis(outputs.get("svis", ""), data.vlans)
+    data.lags = parse_lags(outputs.get("lags", ""))
     if outputs.get("interfaces") and not data.interfaces:
         data.warnings.append("No se pudo interpretar el estado de puertos (show interfaces status).")
     return data

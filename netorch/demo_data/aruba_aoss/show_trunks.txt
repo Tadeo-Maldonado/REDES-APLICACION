@@ -1,0 +1,5 @@
+
+ Load Balancing Method:  L3-based (default)
+
+  Port | Name                             Type      | Group  Type
+  ---- + -------------------------------- --------- + ------ --------

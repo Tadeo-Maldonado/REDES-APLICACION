@@ -97,11 +97,13 @@ class Storage:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.conn() as c:
+            c.execute("PRAGMA journal_mode = WAL")   # lecturas y escrituras concurrentes
             c.executescript(SCHEMA)
 
     @contextmanager
     def conn(self) -> Iterator[sqlite3.Connection]:
-        c = sqlite3.connect(self.path)
+        # timeout: varios switches pueden guardar resultados al mismo tiempo
+        c = sqlite3.connect(self.path, timeout=30)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys = ON")
         try:

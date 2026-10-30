@@ -119,6 +119,16 @@ def parse_svis_aoss(text: str, vlans: dict[int, Vlan]) -> None:
             by_name[m.group(1).strip().lower()].svi_ip = m.group(2)
 
 
+def parse_trunks_aoss(text: str) -> dict[str, list[str]]:
+    """'show trunks': '  49   |   SFP+SR   | Trk1   LACP'."""
+    lags: dict[str, list[str]] = {}
+    for line in (text or "").splitlines():
+        m = re.match(r"^\s*(\S+)\s+\|.*\|\s*(Trk\d+)\b", line)
+        if m:
+            lags.setdefault(m.group(2), []).append(m.group(1))
+    return lags
+
+
 # ----------------------------------------------------------------- AOS-CX ----
 def parse_mac_cx(text: str) -> list[MacEntry]:
     out = []
@@ -151,10 +161,12 @@ def parse_interfaces_cx(text: str) -> dict[str, Interface]:
     return result
 
 
-def apply_port_config_cx(text: str, interfaces: dict[str, Interface]) -> None:
-    """'show running-config interface': vlan access / trunk native / trunk allowed."""
+def apply_port_config_cx(text: str, interfaces: dict[str, Interface],
+                         lags: dict[str, list[str]] | None = None) -> None:
+    """'show running-config interface': vlan access / trunk native / trunk allowed / lag N."""
+    lags = lags if lags is not None else {}
     for block in split_blocks(text, r"^interface\s+\S+"):
-        port = block.splitlines()[0].split()[1]
+        port = "".join(block.splitlines()[0].split()[1:])      # "interface lag 1" -> "lag1"
         if port.lower().startswith("vlan") or port.lower().startswith("loopback"):
             continue
         iface = interfaces.setdefault(port, Interface(port=port))
@@ -172,6 +184,8 @@ def apply_port_config_cx(text: str, interfaces: dict[str, Interface]) -> None:
                                             set(expand_vlan_list(m.group(1))))
             elif line == "routing":
                 iface.mode = "routed"
+            elif m := re.match(r"^lag (\d+)$", line):
+                lags.setdefault(f"lag{m.group(1)}", []).append(port)
     for iface in interfaces.values():
         if iface.mode == "trunk" and iface.access_vlan is None:
             iface.access_vlan = 1
@@ -205,7 +219,7 @@ def parse(outputs: dict[str, str], platform: str) -> ParsedData:
         data.neighbors = parse_lldp_cx(outputs.get("neighbors_lldp", ""))
         data.macs = parse_mac_cx(outputs.get("mac", ""))
         data.interfaces = parse_interfaces_cx(outputs.get("interfaces", ""))
-        apply_port_config_cx(outputs.get("port_config", ""), data.interfaces)
+        apply_port_config_cx(outputs.get("port_config", ""), data.interfaces, data.lags)
         data.vlans = parse_vlans_cx(outputs.get("vlans", ""))
         parse_svis_cx(outputs.get("svis", ""), data.vlans)
     else:
@@ -220,4 +234,5 @@ def parse(outputs: dict[str, str], platform: str) -> ParsedData:
             iface.tagged_vlans.sort()
             iface.mode = tagging_mode(iface)
         parse_svis_aoss(outputs.get("svis", ""), data.vlans)
+        data.lags = parse_trunks_aoss(outputs.get("lags", ""))
     return data

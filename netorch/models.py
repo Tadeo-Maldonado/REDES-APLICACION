@@ -58,6 +58,7 @@ class ParsedData:
     macs: list[MacEntry] = field(default_factory=list)
     arp: list[ArpEntry] = field(default_factory=list)
     vlans: dict[int, Vlan] = field(default_factory=dict)
+    lags: dict[str, list[str]] = field(default_factory=dict)   # puerto lógico -> miembros
     warnings: list[str] = field(default_factory=list)
 
 
@@ -69,6 +70,7 @@ CAT_TRUNK_EMPTY = "Trunk sin vecinos ni MACs"
 CAT_ROUTED = "Puerto L3 (routed)"
 CAT_UP_NO_MAC = "Activo sin MAC aprendida"
 CAT_DOWN = "Inactivo"
+CAT_LAG_MEMBER = "Miembro de LAG / Port-channel"
 
 
 @dataclass

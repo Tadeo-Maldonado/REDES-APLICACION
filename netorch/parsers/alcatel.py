@@ -96,6 +96,42 @@ def parse_interfaces(text: str) -> dict[str, Interface]:
     return result
 
 
+def apply_link_status(text: str, interfaces: dict[str, Interface]) -> None:
+    """'show interfaces alias': estado real del enlace + descripción (alias).
+
+     1/1/1      enable          up          "PC-01"
+    """
+    for line in (text or "").splitlines():
+        m = re.match(rf"^\s*({PORT_RE})\s+(enable|disable)\w*\s+(up|down)\b\s*(.*)$",
+                     line, re.IGNORECASE)
+        if not m:
+            continue
+        port = m.group(1)
+        iface = interfaces.setdefault(port, Interface(port=port))
+        if m.group(2).lower().startswith("disable"):
+            iface.status = "disabled"
+        else:
+            iface.status = m.group(3).lower()
+        alias = m.group(4).strip().strip('"').strip()
+        if alias:
+            iface.description = alias
+
+
+def parse_linkagg_ports(text: str) -> dict[str, list[str]]:
+    """'show linkagg port': puerto físico -> número de agregado.
+
+     1/1/25    Dynamic    1025    ATTACHED    1    UP    UP   YES
+    En la tabla MAC el agregado aparece como '0/<n>'.
+    """
+    lags: dict[str, list[str]] = {}
+    for line in (text or "").splitlines():
+        m = re.match(rf"^\s*({PORT_RE})\s+(Static|Dynamic)\s+\d+\s+\S+\s+(\d+)\b",
+                     line, re.IGNORECASE)
+        if m:
+            lags.setdefault(f"0/{m.group(3)}", []).append(m.group(1))
+    return lags
+
+
 def apply_vlan_ports(text: str, interfaces: dict[str, Interface]) -> None:
     for line in (text or "").splitlines():
         m = re.match(r"^\s*(\d{1,4})\s+(\S+)\s+(default|untagged|qtagged|tagged|dynamic|mobile)\b",
@@ -152,7 +188,9 @@ def parse(outputs: dict[str, str], platform: str) -> ParsedData:
     data.macs = parse_mac(outputs.get("mac", ""))
     data.arp = generic_arp(outputs.get("arp", ""))
     data.interfaces = parse_interfaces(outputs.get("interfaces", ""))
+    apply_link_status(outputs.get("link_status", ""), data.interfaces)
     apply_vlan_ports(outputs.get("vlan_ports", ""), data.interfaces)
     data.vlans = parse_vlans(outputs.get("vlans", ""))
     parse_svis(outputs.get("svis", ""), data.vlans)
+    data.lags = parse_linkagg_ports(outputs.get("lags", ""))
     return data

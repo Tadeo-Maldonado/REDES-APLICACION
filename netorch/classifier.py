@@ -19,7 +19,7 @@ import re
 from collections import defaultdict
 from typing import Optional
 
-from .models import (CAT_DOWN, CAT_HOST, CAT_INFRA, CAT_ROUTED, CAT_TRUNK_EMPTY,
+from .models import (CAT_DOWN, CAT_HOST, CAT_INFRA, CAT_LAG_MEMBER, CAT_ROUTED, CAT_TRUNK_EMPTY,
                      CAT_UNMANAGED, CAT_UP_NO_MAC, Interface, Neighbor, ParsedData, PortRow)
 from .utils import compact_vlan_list, normalize_port, short_hostname
 
@@ -106,7 +106,31 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
         ips = ip_by_mac.get(mac)
         return ", ".join(ips) if ips else None
 
-    ports = set(interfaces) | set(macs_by_port) | set(neigh_by_port)
+    # --- LAG / Port-channel / linkagg -------------------------------------
+    # Las MACs se aprenden en el puerto lógico (Po1, Trk1, lag1, 0/1) pero CDP/LLDP se ve
+    # en los miembros físicos. Si algún miembro tiene vecino, las MACs del LAG son de ese
+    # uplink: se le asignan y el LAG no se reporta aparte (ni sus MACs como hosts).
+    lag_of: dict[str, str] = {}
+    absorbed: set[str] = set()
+    for lag, members in data.lags.items():
+        lag_n = normalize_port(lag)
+        members = [normalize_port(m) for m in members]
+        for m in members:
+            lag_of[m] = lag_n
+        with_neigh = [m for m in members if m in neigh_by_port]
+        if with_neigh:
+            macs_by_port[with_neigh[0]] |= macs_by_port.pop(lag_n, set())
+            absorbed.add(lag_n)
+        # Los miembros heredan la VLAN del LAG si no tienen la suya
+        if lag_n in interfaces:
+            for m in members:
+                iface_m = interfaces.get(m)
+                if iface_m and not iface_m.mode and not iface_m.access_vlan:
+                    iface_m.mode = interfaces[lag_n].mode
+                    iface_m.access_vlan = interfaces[lag_n].access_vlan
+                    iface_m.tagged_vlans = list(interfaces[lag_n].tagged_vlans)
+
+    ports = (set(interfaces) | set(macs_by_port) | set(neigh_by_port) | set(lag_of)) - absorbed
     rows: list[PortRow] = []
 
     for port in sorted(ports, key=_port_sort_key):
@@ -117,6 +141,12 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
         status = iface.status if iface else ("up" if macs or port in neigh_by_port else "unknown")
         vlan = _vlan_text(iface)
         mode = iface.mode if iface else None
+
+        # Miembro de un LAG sin vecino propio: sus MACs están en el puerto lógico
+        if port in lag_of and port not in neigh_by_port:
+            rows.append(PortRow(port=port, status=status, vlan=vlan, device_type="-",
+                                category=CAT_LAG_MEMBER, name=f"Miembro de {lag_of[port]}"))
+            continue
 
         # 1) Vecinos directos de infraestructura (CDP/LLDP)
         if port in neigh_by_port:
@@ -162,9 +192,13 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
                                 category=CAT_HOST, mac=mac, ip=ip_for(mac), method=method,
                                 mac_count=1))
         elif len(macs) > 1:
+            members = next((m for k, m in data.lags.items() if normalize_port(k) == port), None)
+            label = f"{len(macs)} MACs aprendidas"
+            if members:
+                label += f" (LAG: {', '.join(members)})"
             rows.append(PortRow(port=port, status=status, vlan=vlan,
                                 device_type="No administrado", category=CAT_UNMANAGED,
-                                name=f"{len(macs)} MACs aprendidas", method="Conteo de MACs",
+                                name=label, method="Conteo de MACs",
                                 mac_count=len(macs)))
         elif status == "up":
             cat = CAT_TRUNK_EMPTY if mode == "trunk" else CAT_UP_NO_MAC

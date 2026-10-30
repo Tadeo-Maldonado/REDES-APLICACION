@@ -7,6 +7,8 @@ from __future__ import annotations
 import ipaddress
 import os
 import tempfile
+import threading
+import time
 from datetime import datetime
 
 import pandas as pd
@@ -15,7 +17,7 @@ import streamlit.components.v1 as components
 
 from netorch.analysis import diff_runs, project_summary
 from netorch.commands import PLATFORMS, platform_choices
-from netorch.engine import DemoSession, NetmikoSession, Target, run_collection
+from netorch.engine import DemoSession, NetmikoSession, Target, run_many
 from netorch.models import CAT_DOWN
 from netorch.storage import DEFAULT_DB, Storage
 from netorch.topology import build_graph, render_html
@@ -107,9 +109,9 @@ with st.sidebar:
         if st.button("🎬 Cargar proyecto demo", width="stretch"):
             pid = db.create_project(f"Demo · Sede Monterrey ({datetime.now():%H:%M})",
                                     "Datos de ejemplo: core Cisco + accesos Aruba y Alcatel")
-            for plat, ip in DEMO_SET:
-                run_collection(db, pid, Target(host=ip, platform=plat, username="demo"),
-                               ["show version"], session_factory=DemoSession, notes="demo")
+            run_many(db, pid, [Target(host=ip, platform=plat, username="demo", name=f"SW{i + 1}")
+                               for i, (plat, ip) in enumerate(DEMO_SET)],
+                     ["show version"], session_factory=DemoSession, notes="demo")
             st.session_state.project_id = pid
             st.rerun()
         st.stop()
@@ -143,44 +145,176 @@ tab_run, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
     ["🚀 Nueva ejecución", "📋 Resultados", "🗺️ Topología del proyecto", "🔍 Comparar", "📜 Historial"])
 
 # ======================================================= Nueva ejecución =====
-with tab_run:
-    st.subheader("Conectar a un switch")
-    st.caption("La app abre SSH únicamente contra el equipo indicado: no hace escaneos de red. "
-               "Las contraseñas no se guardan.")
-    with st.form("run_form"):
-        c1, c2, c3 = st.columns([2, 2, 1])
-        host = c1.text_input("IP del switch", placeholder="10.0.0.1")
-        choices = platform_choices()
-        platform = c2.selectbox("Vendor / OS", list(choices), format_func=choices.get)
-        port = c3.number_input("Puerto SSH", min_value=1, max_value=65535, value=22)
-        c4, c5, c6 = st.columns(3)
-        user = c4.text_input("Usuario")
-        password = c5.text_input("Contraseña", type="password")
-        secret = c6.text_input("Enable password (si aplica)", type="password")
-        with st.expander("🔑 Llave SSH privada (opcional)"):
-            key_upload = st.file_uploader("Archivo de llave (id_rsa, id_ed25519…)", type=None)
-            key_pass = st.text_input("Passphrase de la llave", type="password")
-        custom = st.text_area("Comandos adicionales / Custom CLI (uno por línea)",
-                              placeholder="show log\nshow power inline\nshow running-config",
-                              height=110)
-        c7, c8 = st.columns([3, 1])
-        notes = c7.text_input("Nota de la ejecución (opcional)", placeholder="Ej. antes de la ventana de cambio")
-        timeout = c8.number_input("Timeout (s)", min_value=5, max_value=120, value=20)
-        demo = st.checkbox("Modo demo: usar salidas de ejemplo de esta plataforma (sin conectarse)")
-        submitted = st.form_submit_button("▶️ Ejecutar recolección", type="primary",
-                                          width="stretch")
+CHOICES = platform_choices()
+LABEL_TO_KEY = {v: k for k, v in CHOICES.items()}
+COLS = ["Nombre", "IP", "Vendor / OS", "Puerto SSH", "Usuario (opcional)"]
 
-    if submitted:
-        errors = []
-        if not demo:
-            try:
-                ipaddress.ip_address(host.strip())
-            except ValueError:
-                errors.append("La IP del switch no es válida.")
-            if not user.strip():
-                errors.append("Falta el usuario SSH.")
-            if not password and not key_upload:
-                errors.append("Ingresa una contraseña o una llave SSH.")
+
+def vendor_from_text(text: str) -> str | None:
+    """Acepta la clave, la etiqueta o algo aproximado: 'cisco', 'nxos', 'aruba cx', 'OS6860'..."""
+    t = str(text or "").strip().lower()
+    if not t:
+        return None
+    if t in CHOICES:
+        return t
+    for label, key in LABEL_TO_KEY.items():
+        if t == label.lower():
+            return key
+    if "nx" in t:
+        return "cisco_nxos"
+    if "cisco" in t or "ios" in t:
+        return "cisco_ios"
+    if "cx" in t:
+        return "aruba_aoscx"
+    if "aruba" in t or "procurve" in t or "aos-s" in t or t in ("hp", "hpe"):
+        return "aruba_aoss"
+    if "alcatel" in t or "omni" in t or t.startswith("os6") or t.startswith("os9") or "ale" == t:
+        return "alcatel_aos"
+    return None
+
+
+def table_from_records(records: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame(records, columns=COLS)
+
+
+def new_table(df: pd.DataFrame):
+    st.session_state.switch_table = df
+    st.session_state.editor_ver = st.session_state.get("editor_ver", 0) + 1
+
+
+if "switch_table" not in st.session_state:
+    new_table(table_from_records([{"Nombre": "SW1", "IP": "", "Vendor / OS": CHOICES["cisco_ios"],
+                                   "Puerto SSH": 22, "Usuario (opcional)": ""}]))
+
+with tab_run:
+    st.subheader("1 · Switches a ejecutar")
+    st.caption("Agrega una fila por switch (botón ➕ al pie de la tabla). La app abre SSH solo contra "
+               "estos equipos, en paralelo: no hace escaneos de red.")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    if c1.button("🎬 Llenar con ejemplo demo", width="stretch"):
+        new_table(table_from_records([
+            {"Nombre": f"SW{i + 1}", "IP": ip, "Vendor / OS": CHOICES[plat], "Puerto SSH": 22,
+             "Usuario (opcional)": ""} for i, (plat, ip) in enumerate(DEMO_SET)]))
+        st.rerun()
+    c2.download_button("⬇️ Plantilla CSV", "nombre,ip,vendor,puerto,usuario\n"
+                       "SW1,10.0.0.1,cisco_ios,22,\nSW2,10.0.0.13,alcatel_aos,22,\n",
+                       file_name="inventario_switches.csv", width="stretch")
+    csv_file = c3.file_uploader("Importar inventario CSV (sin contraseñas)", type=["csv"],
+                                label_visibility="collapsed")
+    if csv_file is not None and st.session_state.get("csv_loaded") != csv_file.file_id:
+        try:
+            inv = pd.read_csv(csv_file, dtype=str).fillna("")
+            inv.columns = [c.strip().lower() for c in inv.columns]
+            recs, bad = [], []
+            for _, r in inv.iterrows():
+                key = vendor_from_text(r.get("vendor", ""))
+                if not key:
+                    bad.append(r.get("ip", "?"))
+                recs.append({"Nombre": r.get("nombre", "") or r.get("name", ""),
+                             "IP": r.get("ip", "").strip(),
+                             "Vendor / OS": CHOICES.get(key or "cisco_ios"),
+                             "Puerto SSH": int(r.get("puerto", "") or 22),
+                             "Usuario (opcional)": r.get("usuario", "") or r.get("user", "")})
+            st.session_state.csv_loaded = csv_file.file_id
+            new_table(table_from_records(recs))
+            if bad:
+                st.session_state.csv_warning = ("Vendor no reconocido (se puso Cisco IOS, revísalo) en: "
+                                                + ", ".join(bad))
+            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo leer el CSV: {exc}")
+    if st.session_state.get("csv_warning"):
+        st.warning(st.session_state.pop("csv_warning"))
+
+    edited = st.data_editor(
+        st.session_state.switch_table, key=f"sw_editor_{st.session_state.editor_ver}",
+        num_rows="dynamic", width="stretch", hide_index=True,
+        column_config={
+            "Nombre": st.column_config.TextColumn(help="Cómo quieres identificarlo (SW1, Core MTY…)"),
+            "IP": st.column_config.TextColumn(help="IP de gestión del switch", required=True),
+            "Vendor / OS": st.column_config.SelectboxColumn(options=list(CHOICES.values()),
+                                                            required=True, width="large",
+                                                            default=CHOICES["cisco_ios"]),
+            "Puerto SSH": st.column_config.NumberColumn(min_value=1, max_value=65535, step=1,
+                                                        default=22),
+            "Usuario (opcional)": st.column_config.TextColumn(
+                help="Solo si este switch usa un usuario distinto al común"),
+        })
+    rows_in = [r for r in edited.to_dict("records") if str(r.get("IP") or "").strip()
+               or str(r.get("Nombre") or "").strip()]
+
+    st.subheader("2 · Credenciales")
+    st.caption("Las contraseñas no se guardan en ningún lado.")
+    cred_mode = st.radio("Credenciales", ["Las mismas para todos", "Distintas por switch"],
+                         horizontal=True, label_visibility="collapsed")
+    common = {}
+    per_switch: dict[int, dict] = {}
+    if cred_mode == "Las mismas para todos":
+        c4, c5, c6 = st.columns(3)
+        common["user"] = c4.text_input("Usuario")
+        common["password"] = c5.text_input("Contraseña", type="password")
+        common["secret"] = c6.text_input("Enable password (si aplica)", type="password")
+    else:
+        if not rows_in:
+            st.info("Primero agrega switches en la tabla.")
+        for i, r in enumerate(rows_in):
+            label = r.get("Nombre") or f"Switch {i + 1}"
+            c4, c5, c6, c7 = st.columns([1.2, 1.2, 1.2, 1.2])
+            c4.markdown(f"**{label}**  \n`{r.get('IP') or 'sin IP'}`")
+            uid = f"{i}_{r.get('IP')}"
+            per_switch[i] = {
+                "user": c5.text_input("Usuario", value=r.get("Usuario (opcional)") or "",
+                                      key=f"u_{uid}"),
+                "password": c6.text_input("Contraseña", type="password", key=f"p_{uid}"),
+                "secret": c7.text_input("Enable", type="password", key=f"e_{uid}"),
+            }
+    with st.expander("🔑 Llave SSH privada (opcional, aplica a todos)"):
+        key_upload = st.file_uploader("Archivo de llave (id_rsa, id_ed25519…)", key="key_up")
+        key_pass = st.text_input("Passphrase de la llave", type="password")
+
+    st.subheader("3 · Opciones")
+    custom = st.text_area("Comandos adicionales / Custom CLI (uno por línea, se ejecutan en todos)",
+                          placeholder="show log\nshow power inline\nshow running-config", height=100)
+    c8, c9, c10 = st.columns([3, 1, 1])
+    notes = c8.text_input("Nota de la ejecución (opcional)", placeholder="Ej. antes de la ventana de cambio")
+    timeout = c9.number_input("Timeout SSH (s)", min_value=5, max_value=120, value=20)
+    workers = c10.number_input("Switches en paralelo", min_value=1, max_value=10, value=4,
+                               help="Cuántas sesiones SSH simultáneas abrir")
+    demo = st.checkbox("Modo demo: usar salidas de ejemplo de cada plataforma (sin conectarse)")
+
+    n = len(rows_in)
+    go = st.button(f"▶️ Ejecutar recolección en {n} switch{'es' if n != 1 else ''}", type="primary",
+                   width="stretch", disabled=n == 0)
+
+    if go:
+        errors, targets, seen = [], [], set()
+        for i, r in enumerate(rows_in):
+            label = r.get("Nombre") or f"Switch {i + 1}"
+            ip = str(r.get("IP") or "").strip()
+            plat = LABEL_TO_KEY.get(r.get("Vendor / OS"))
+            creds = common if cred_mode == "Las mismas para todos" else per_switch.get(i, {})
+            user = str(r.get("Usuario (opcional)") or "").strip() \
+                if cred_mode == "Las mismas para todos" and str(r.get("Usuario (opcional)") or "").strip() \
+                else (creds.get("user") or "").strip()
+            if not plat:
+                errors.append(f"{label}: elige el vendor / OS.")
+            if not demo:
+                try:
+                    ipaddress.ip_address(ip)
+                except ValueError:
+                    errors.append(f"{label}: la IP «{ip}» no es válida.")
+                if ip in seen:
+                    errors.append(f"{label}: la IP {ip} está repetida.")
+                if not user:
+                    errors.append(f"{label}: falta el usuario SSH.")
+                if not creds.get("password") and not key_upload:
+                    errors.append(f"{label}: falta contraseña (o una llave SSH).")
+            seen.add(ip)
+            targets.append(Target(host=ip or f"demo-{i + 1}", platform=plat or "cisco_ios",
+                                  username=user, password=creds.get("password", ""),
+                                  secret=creds.get("secret", ""), port=int(r.get("Puerto SSH") or 22),
+                                  key_passphrase=key_pass or None, timeout=int(timeout),
+                                  name=r.get("Nombre") or None))
         if errors:
             for e in errors:
                 st.error(e)
@@ -191,32 +325,66 @@ with tab_run:
                 with os.fdopen(fd, "wb") as f:
                     f.write(key_upload.getvalue())
                 os.chmod(key_path, 0o600)
-            target = Target(host=host.strip() or "demo", platform=platform, username=user.strip(),
-                            password=password, secret=secret, port=int(port), key_file=key_path,
-                            key_passphrase=key_pass or None, timeout=int(timeout))
-            bar = st.progress(0.0, text="Iniciando…")
-            try:
-                run_id = run_collection(
-                    db, pid, target, custom.splitlines(),
-                    progress=lambda msg, frac: bar.progress(min(frac, 1.0), text=msg),
-                    session_factory=DemoSession if demo else NetmikoSession,
-                    notes=("[demo] " if demo else "") + notes)
-            finally:
-                if key_path and os.path.exists(key_path):
-                    os.remove(key_path)
-            run = db.get_run(run_id)
-            st.session_state.selected_run = run_id
-            if run["status"] == "ok":
-                s = run["summary"]
-                bar.progress(1.0, text="Completado")
-                st.success(f"Ejecución #{run_id} guardada en el proyecto · **{run['hostname'] or host}** · "
-                           f"{s['puertos_activos']}/{s['puertos_total']} puertos activos · "
-                           f"{s['hosts']} hosts · {s['vecinos_infra']} vecinos de infraestructura. "
-                           "Ve a la pestaña **📋 Resultados**.")
+                for t in targets:
+                    t.key_file = key_path
+
+            # Progreso: los hilos solo escriben en este dict; la UI se actualiza desde aquí
+            state = {i: ("En cola", 0.0) for i in range(len(targets))}
+            lock = threading.Lock()
+
+            def on_progress(i, msg, frac):
+                with lock:
+                    state[i] = (msg, frac)
+
+            outcome: dict = {}
+
+            def worker():
+                try:
+                    outcome["ids"] = run_many(
+                        db, pid, targets, custom.splitlines(), progress=on_progress,
+                        session_factory=DemoSession if demo else NetmikoSession,
+                        max_workers=int(workers), notes=("[demo] " if demo else "") + notes)
+                except Exception as exc:          # no debería pasar: cada switch captura lo suyo
+                    outcome["error"] = exc
+
+            board = st.empty()
+
+            def draw():
+                with lock:
+                    snap = dict(state)
+                board.dataframe(pd.DataFrame([{
+                    "Switch": t.label, "IP": t.host, "Progreso": snap[i][1], "Estado": snap[i][0],
+                } for i, t in enumerate(targets)]), hide_index=True, width="stretch",
+                    column_config={"Progreso": st.column_config.ProgressColumn(
+                        min_value=0.0, max_value=1.0, format="percent")})
+
+            th = threading.Thread(target=worker, daemon=True)
+            th.start()
+            while th.is_alive():
+                draw()
+                time.sleep(0.4)
+            th.join()
+            draw()
+            if key_path and os.path.exists(key_path):
+                os.remove(key_path)
+
+            if "error" in outcome:
+                st.error(f"Error inesperado: {outcome['error']}")
             else:
-                bar.empty()
-                st.error(f"La ejecución #{run_id} falló: {run['error']}")
-                st.caption("Las salidas obtenidas antes del error quedan en Resultados → Raw logs.")
+                done = [db.get_run(i) for i in outcome["ids"]]
+                ok = [r for r in done if r["status"] == "ok"]
+                if ok:
+                    st.session_state.selected_run = ok[0]["id"]
+                (st.success if len(ok) == len(done) else st.warning)(
+                    f"{len(ok)} de {len(done)} switches recolectados y guardados en el proyecto. "
+                    "Revisa cada uno en **📋 Resultados** y la vista unida en **🗺️ Topología del proyecto**.")
+                st.dataframe(pd.DataFrame([{
+                    "Ejecución": f"#{r['id']}", "Switch": r.get("hostname") or "-", "IP": r["switch_ip"],
+                    "Estado": RUN_STATUS.get(r["status"], r["status"]),
+                    "Puertos activos": f"{r['summary'].get('puertos_activos', '-')}/{r['summary'].get('puertos_total', '-')}",
+                    "Hosts": r["summary"].get("hosts", "-"), "Vecinos": r["summary"].get("vecinos_infra", "-"),
+                    "Error": r.get("error") or "",
+                } for r in done]), hide_index=True, width="stretch")
 
 # ============================================================ Resultados =====
 with tab_res:

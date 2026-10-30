@@ -1,0 +1,11 @@
+ Chas/
+ Slot/Port  Admin Status  Link Status  Alias
+----------+--------------+------------+----------------------------------------
+ 1/1/1      enable          up          "PC-CONTABILIDAD"
+ 1/1/2      enable          up          "PC-COMPRAS"
+ 1/1/3      enable          down        ""
+ 1/1/4      disable         down        "RESERVADO"
+ 1/1/5      enable          up          "SRV-BACKUP"
+ 1/1/8      enable          up          "SALA-JUNTAS"
+ 1/1/25     enable          up          "UPLINK-CORE-A"
+ 1/1/26     enable          up          "UPLINK-CORE-B"

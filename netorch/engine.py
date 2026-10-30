@@ -33,6 +33,11 @@ class Target:
     key_file: Optional[str] = None
     key_passphrase: Optional[str] = None
     timeout: int = 20
+    name: Optional[str] = None    # nombre que le da el usuario (SW1, Core MTY...)
+
+    @property
+    def label(self) -> str:
+        return self.name or self.host
 
 
 class Session(Protocol):
@@ -140,7 +145,7 @@ def run_collection(storage: Storage, project_id: int, target: Target,
     try:
         progress(f"Conectando por SSH a {target.host}:{target.port}…", 0.02)
         session = session_factory(target)
-        hostname = session.hostname()
+        hostname = session.hostname() or target.name
         warnings = list(getattr(session, "warnings", []))
         outputs: dict[str, str] = {}
 
@@ -191,10 +196,39 @@ def run_collection(storage: Storage, project_id: int, target: Target,
         progress("Listo.", 1.0)
     except Exception as exc:
         log.exception("Fallo en la ejecución %s", run_id)
-        storage.finish_run(run_id, status="error", hostname=hostname,
+        storage.finish_run(run_id, status="error", hostname=hostname or target.name,
                            error=_friendly_error(exc),
                            warnings=[traceback.format_exc(limit=3)])
     finally:
         if session:
             session.close()
     return run_id
+
+
+def run_many(storage: Storage, project_id: int, targets: list[Target],
+             custom_commands: Optional[list[str]] = None,
+             progress: Optional[Callable[[int, str, float], None]] = None,
+             session_factory: Callable[[Target], Session] = NetmikoSession,
+             max_workers: int = 4, notes: str = "") -> list[int]:
+    """Ejecuta la recolección en varios switches en paralelo (una sesión SSH por switch).
+
+    progress(i, mensaje, fracción) se llama desde hilos de trabajo; i = índice del switch.
+    Devuelve los ids de ejecución en el mismo orden que `targets`.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    progress = progress or (lambda i, msg, frac: None)
+    results: list[int] = [0] * len(targets)
+
+    def work(i: int, t: Target) -> None:
+        results[i] = run_collection(storage, project_id, t, custom_commands,
+                                    progress=lambda msg, frac: progress(i, msg, frac),
+                                    session_factory=session_factory, notes=notes)
+        run = storage.get_run(results[i])
+        progress(i, "✅ Listo" if run["status"] == "ok" else f"❌ {run['error']}", 1.0)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(targets)))) as pool:
+        futures = [pool.submit(work, i, t) for i, t in enumerate(targets)]
+        for f in futures:
+            f.result()
+    return results
