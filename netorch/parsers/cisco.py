@@ -15,7 +15,7 @@ STATUS_WORDS = {
     "xcvrabsent": "down", "xcvrabsen": "down", "nooperm": "down", "nooper": "down",
     "inactive": "down", "suspended": "down", "suspnd": "down", "monitoring": "up",
     "faulty": "down", "linkflapdisabled": "disabled",
-    "disabled": "disabled", "err-disabled": "disabled", "err-disabl": "disabled",
+    "disabled": "disabled", "err-disabled": "err-disabled", "err-disabl": "err-disabled",
 }
 
 

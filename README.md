@@ -31,7 +31,8 @@ usando salidas de ejemplo, para explorar todas las vistas. También puedes marca
 |---|---|
 | **Proyectos** (barra lateral) | Crear, alternar y borrar proyectos. Cada proyecto acumula sus ejecuciones de forma aislada. |
 | **🚀 Nueva ejecución** | Tabla de **varios switches** (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
-| **📋 Resultados** | Las 4 capas: **Resumen ejecutivo** (switch + acumulado del proyecto), **Tabla consolidada de mapeo**, **Topología** interactiva y **Raw logs** (auditoría, descargables). Además VLANs/SVIs. |
+| **📑 Reporte** | Aparece solo al terminar cada ejecución y en su propia pestaña (proyecto completo, última tanda o una ejecución): métricas, **hallazgos con severidad y recomendación**, **diagrama de red** y **exportación**. |
+| **📋 Resultados por switch** | Las 4 capas: **Resumen ejecutivo** (switch + acumulado del proyecto), **Tabla consolidada de mapeo**, **Topología** interactiva y **Raw logs** (auditoría, descargables). Además VLANs/SVIs. |
 | **🗺️ Topología del proyecto** | Une la última ejecución de cada switch en un solo diagrama: si un switch escaneado aparece como vecino de otro, se "cosen" por IP de gestión o hostname. |
 | **🔍 Comparar** | Diferencias entre dos ejecuciones: equipos nuevos/desaparecidos, puertos que cambiaron de estado y hosts que se movieron de puerto. |
 | **📜 Historial** | Todas las ejecuciones del proyecto, con errores y notas. |
@@ -41,6 +42,34 @@ usando salidas de ejemplo, para explorar todas las vistas. También puedes marca
 `Puerto | Estado | VLAN Native/Tagged | Tipo de Dispositivo | Vecino / Host Name |
 Dirección MAC | Dirección IP | Método de Detección` (+ categoría, MACs en el puerto,
 puerto remoto). Exportable a CSV.
+
+## Hallazgos automáticos
+
+`netorch/findings.py` revisa cada switch y el conjunto del proyecto:
+
+| Severidad | Ejemplos |
+|---|---|
+| 🔴 Alta | Hubs/switches no administrados (acceso o trunk sin CDP/LLDP), puertos *err-disabled*, **VLAN nativa o modo distinto entre dos switches**, switches que no se pudieron recolectar |
+| 🟠 Media | Hosts sin IP (el gateway está en otro equipo), sin CDP/LLDP, la misma MAC como host en dos puertos |
+| 🟡 Baja | Hosts en puertos trunk, puertos con enlace pero sin tráfico |
+| 🔵 Info | Inventario por switch, puertos apagados, capacidad libre, equipos de infraestructura vistos pero no recolectados |
+
+En la vista de proyecto las **IPs se cruzan entre switches**: si un host del switch de acceso
+no tiene IP local, se toma de la ARP del core (se indica «IP vía ARP de …»).
+
+## Diagrama de red
+
+Íconos propios por tipo de equipo (switch recolectado con insignia ✓, switch vecino, router,
+firewall, AP, teléfono, host, servidor, no administrado) y **acomodo jerárquico sin cruces**:
+firewalls/routers arriba, core, acceso, y cada switch con sus equipos debajo. Botones para
+cambiar a acomodo libre, encuadrar y **descargar PNG** en alta resolución. Funciona sin internet.
+
+## Exportación
+
+Desde el reporte: **Reporte HTML** (autocontenido, con el diagrama interactivo), **Excel**
+(Resumen, Hallazgos, Mapeo, VLANs, Ejecuciones), **Diagrama HTML** y **ZIP** con todo
+(+ CSV y raw logs). O **💾 Guardar en una carpeta** de tu equipo (por defecto
+`Documentos/NetOrch/<proyecto>/<fecha-hora>/`) con botón para abrirla.
 
 ## Lógica de filtrado (cero "info basura")
 
@@ -96,7 +125,10 @@ netorch/
   classifier.py            Algoritmo de filtrado L1/L2 y métricas
   storage.py               SQLite local por proyectos
   analysis.py              Acumulado del proyecto y comparación de ejecuciones
-  topology.py              Diagrama interactivo (Pyvis / vis.js)
+  topology.py              Diagrama interactivo (vis-network) con layout de árbol propio
+  icons.py                 Íconos SVG de los equipos
+  findings.py              Hallazgos automáticos con severidad
+  report.py                Reporte HTML, Excel, ZIP y guardado en carpeta
   demo_data/               Salidas de ejemplo por plataforma (demo y pruebas)
 tests/                     Pruebas (pytest) con las salidas de ejemplo
 data/netorch.db            Base local (se crea sola; está en .gitignore)
@@ -109,6 +141,7 @@ projects (id, name UNIQUE, description, created_at)
   └─ runs (id, project_id, switch_ip, platform, hostname, username, started_at,
            finished_at, status ok|error|running, error, summary JSON, warnings JSON, notes)
        ├─ raw_outputs (run_id, seq, key, command, output, is_custom, ok)
+       ├─ arp_entries (run_id, ip, mac, interface)   ← para cruzar IPs entre switches
        ├─ port_rows   (run_id, port, status, vlan, device_type, category, name, mac, ip,
        │               method, mac_count, remote_port, platform)
        └─ vlans       (run_id, vlan_id, name, svi_ip)

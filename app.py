@@ -10,12 +10,16 @@ import tempfile
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from netorch.analysis import diff_runs, project_summary
+from netorch.analysis import diff_runs, enrich_with_project_arp, project_summary
+from netorch.findings import SEVERITY_ICON, severity_counts
+from netorch.report import (build_report_data, default_export_dir, export_files, open_folder,
+                            save_to_folder, slug)
 from netorch.commands import PLATFORMS, platform_choices
 from netorch.engine import DemoSession, NetmikoSession, Target, run_many
 from netorch.models import CAT_DOWN
@@ -24,7 +28,7 @@ from netorch.topology import build_graph, render_html
 
 st.set_page_config(page_title="NetOrch · Orquestador de Red", page_icon="🛰️", layout="wide")
 
-STATUS_LABEL = {"up": "🟢 Activo", "down": "🔴 Inactivo", "disabled": "⚫ Deshabilitado",
+STATUS_LABEL = {"up": "🟢 Activo", "down": "🔴 Inactivo", "disabled": "⚫ Deshabilitado", "err-disabled": "🟥 Err-disabled",
                 "unknown": "⚪ Desconocido"}
 RUN_STATUS = {"ok": "✅", "error": "❌", "running": "⏳"}
 TABLE_COLUMNS = {
@@ -69,22 +73,118 @@ def rows_df(rows: list[dict], with_switch: bool = False) -> pd.DataFrame:
     return df.rename(columns={**TABLE_COLUMNS, "switch": "Switch"})
 
 
-def show_topology(runs_with_rows, key: str):
+def show_html(html: str, height: int):
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:                                   # Streamlit < 1.50
+        components.html(html, height=height, scrolling=False)
+
+
+def show_topology(runs_with_rows, key: str, title: str = "", hosts_default: bool = True):
     c1, c2, _ = st.columns([1, 1, 3])
-    hosts = c1.toggle("Mostrar hosts finales", value=True, key=f"{key}_hosts")
+    hosts = c1.toggle("Mostrar hosts finales", value=hosts_default, key=f"{key}_hosts")
     unm = c2.toggle("Mostrar no administrados", value=True, key=f"{key}_unm")
     graph = build_graph(runs_with_rows, show_hosts=hosts, show_unmanaged=unm)
     if not graph.nodes:
         st.info("No hay datos para dibujar.")
         return
-    html = render_html(graph, height="640px", dark=is_dark())
-    if hasattr(st, "iframe"):
-        st.iframe(html, height=660)
-    else:                                   # Streamlit < 1.50
-        components.html(html, height=660, scrolling=False)
-    st.caption("🟦 Switch escaneado · 🟦 Switch vecino · 🟪 Router · 🟥 Firewall · 🟩 AP · "
-               "🟨 Teléfono · ⚪ Host · 🟧 No administrado — arrastra, haz zoom y pasa el "
-               "cursor sobre nodos y enlaces para ver detalles.")
+    show_html(render_html(graph, height=640, dark=is_dark(), title=title), height=650)
+    st.caption("Arrastra, haz zoom y pasa el cursor sobre equipos y enlaces. «⇄ Libre / ⇅ Jerárquico» "
+               "cambia el acomodo y «⬇ PNG» descarga la imagen.")
+
+
+@st.cache_data(show_spinner="Preparando archivos del reporte…", max_entries=8)
+def cached_export(run_ids: tuple[int, ...], title: str, scope: str) -> dict[str, bytes]:
+    runs = [db.get_run(i) for i in run_ids]
+    return export_files(db, build_report_data(db, [r for r in runs if r], title, scope))
+
+
+SEV_STYLE = {"Alta": "red", "Media": "orange", "Baja": "yellow", "Info": "blue"}
+
+
+def report_panel(runs: list[dict], title: str, scope: str, key: str):
+    """Reporte con hallazgos + diagrama + exportación (descarga o carpeta local)."""
+    if not runs:
+        st.info("No hay ejecuciones para reportar.")
+        return
+    rd = build_report_data(db, runs, title, scope)
+    st.caption(f"{scope} · {len(rd.runs_with_rows)} switch(es) recolectado(s)"
+               + (f" · {len(rd.failed)} con error" if rd.failed else ""))
+    m = rd.metrics
+    cols = st.columns(6)
+    for col, k in zip(cols, ["Switches recolectados", "Puertos activos", "Hosts", "Hosts con IP",
+                             "Vecinos de infraestructura", "No administrados"]):
+        col.metric(k, m[k])
+
+    st.markdown("#### 🔎 Hallazgos")
+    counts = severity_counts(rd.findings)
+    st.markdown("  ".join(f":{SEV_STYLE[k]}-badge[{SEVERITY_ICON[k]} {k}: {v}]" for k, v in counts.items()))
+    important = [f for f in rd.findings if f.severity in ("Alta", "Media")]
+    minor = [f for f in rd.findings if f.severity not in ("Alta", "Media")]
+    if not rd.findings:
+        st.success("Sin hallazgos.")
+
+    def finding_card(f):
+        with st.container(border=True):
+            st.markdown(f":{SEV_STYLE[f.severity]}-badge[{f.severity}] "
+                        f":gray-badge[{f.category}] **{f.title}**")
+            meta = []
+            if f.switch:
+                meta.append(f"Switch: **{f.switch}**")
+            if f.ports:
+                meta.append(f"Puertos: {f.ports}")
+            if meta:
+                st.caption(" · ".join(meta))
+            st.write(f.detail)
+            if f.recommendation:
+                st.info(f.recommendation, icon="💡")
+
+    for f in important:
+        finding_card(f)
+    if minor:
+        with st.expander(f"Hallazgos de baja prioridad e informativos ({len(minor)})"):
+            for f in minor:
+                finding_card(f)
+
+    st.markdown("#### 🕸️ Diagrama de red")
+    # Con varios switches se abre en vista de infraestructura (más legible); los hosts se activan
+    show_topology(rd.runs_with_rows, key=f"{key}_topo", title=title,
+                  hosts_default=len(rd.runs_with_rows) <= 1)
+
+    st.markdown("#### 💾 Exportar")
+    files = cached_export(tuple(r["id"] for r in runs), title, scope)
+    base = f"{slug(title)}_{datetime.now():%Y%m%d-%H%M}"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.download_button("📄 Reporte HTML", files["reporte.html"], file_name=f"{base}_reporte.html",
+                       mime="text/html", width="stretch", on_click="ignore", key=f"{key}_dl_html")
+    c2.download_button("📊 Excel", files["reporte.xlsx"], file_name=f"{base}.xlsx", width="stretch",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       on_click="ignore", key=f"{key}_dl_xlsx")
+    c3.download_button("🕸️ Diagrama (HTML)", files["topologia.html"], file_name=f"{base}_topologia.html",
+                       mime="text/html", width="stretch", on_click="ignore", key=f"{key}_dl_topo")
+    from netorch.report import to_zip
+    c4.download_button("🗜️ Todo (.zip)", to_zip(files), file_name=f"{base}.zip", mime="application/zip",
+                       width="stretch", on_click="ignore", key=f"{key}_dl_zip")
+    st.caption("El reporte HTML se abre en cualquier navegador sin internet: incluye hallazgos, el diagrama "
+               "interactivo (con botón PNG) y el detalle por switch. El ZIP agrega Excel, CSV y raw logs.")
+    with st.container(border=True):
+        st.markdown("**Guardar en una carpeta de este equipo**")
+        c5, c6 = st.columns([4, 1])
+        folder = c5.text_input("Carpeta destino", value=str(default_export_dir(title)),
+                               key=f"{key}_folder", label_visibility="collapsed")
+        if c6.button("💾 Guardar", key=f"{key}_save", width="stretch", type="primary"):
+            try:
+                st.session_state[f"{key}_saved"] = str(save_to_folder(files, folder))
+            except Exception as exc:
+                st.error(f"No se pudo guardar en «{folder}»: {exc}")
+        saved = st.session_state.get(f"{key}_saved")
+        if saved:
+            st.success(f"Guardado en `{saved}` (reporte.html, reporte.xlsx, diagramas, CSV y raw logs).")
+            if st.button("📂 Abrir carpeta", key=f"{key}_open"):
+                if not open_folder(Path(saved)):
+                    st.warning("No se pudo abrir el explorador; la ruta está arriba.")
+        st.caption("Se crea una subcarpeta con fecha y hora por cada exportación. Si usas la app desde "
+                   "otra computadora, usa los botones de descarga de arriba.")
 
 
 # =============================================================== Sidebar =====
@@ -141,8 +241,9 @@ runs = db.list_runs(pid)
 ok_runs = [r for r in runs if r["status"] == "ok"]
 
 st.header(project["name"])
-tab_run, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
-    ["🚀 Nueva ejecución", "📋 Resultados", "🗺️ Topología del proyecto", "🔍 Comparar", "📜 Historial"])
+tab_run, tab_rep, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
+    ["🚀 Nueva ejecución", "📑 Reporte", "📋 Resultados por switch", "🗺️ Topología del proyecto",
+     "🔍 Comparar", "📜 Historial"])
 
 # ======================================================= Nueva ejecución =====
 CHOICES = platform_choices()
@@ -371,20 +472,61 @@ with tab_run:
             if "error" in outcome:
                 st.error(f"Error inesperado: {outcome['error']}")
             else:
-                done = [db.get_run(i) for i in outcome["ids"]]
-                ok = [r for r in done if r["status"] == "ok"]
-                if ok:
-                    st.session_state.selected_run = ok[0]["id"]
-                (st.success if len(ok) == len(done) else st.warning)(
-                    f"{len(ok)} de {len(done)} switches recolectados y guardados en el proyecto. "
-                    "Revisa cada uno en **📋 Resultados** y la vista unida en **🗺️ Topología del proyecto**.")
-                st.dataframe(pd.DataFrame([{
-                    "Ejecución": f"#{r['id']}", "Switch": r.get("hostname") or "-", "IP": r["switch_ip"],
-                    "Estado": RUN_STATUS.get(r["status"], r["status"]),
-                    "Puertos activos": f"{r['summary'].get('puertos_activos', '-')}/{r['summary'].get('puertos_total', '-')}",
-                    "Hosts": r["summary"].get("hosts", "-"), "Vecinos": r["summary"].get("vecinos_infra", "-"),
-                    "Error": r.get("error") or "",
-                } for r in done]), hide_index=True, width="stretch")
+                st.session_state.last_batch = {"pid": pid, "ids": outcome["ids"],
+                                               "when": datetime.now().strftime("%d/%m/%Y %H:%M")}
+                ok_ids = [i for i in outcome["ids"] if db.get_run(i)["status"] == "ok"]
+                if ok_ids:
+                    st.session_state.selected_run = ok_ids[0]
+                board.empty()
+
+    # Resultado de la última tanda: queda visible aunque la página se recargue
+    batch = st.session_state.get("last_batch")
+    if batch and batch["pid"] == pid:
+        done = [r for r in (db.get_run(i) for i in batch["ids"]) if r]
+        if done:
+            ok = [r for r in done if r["status"] == "ok"]
+            st.divider()
+            (st.success if len(ok) == len(done) else st.warning)(
+                f"Ejecución del {batch['when']}: {len(ok)} de {len(done)} switches recolectados y "
+                "guardados en el proyecto.")
+            st.dataframe(pd.DataFrame([{
+                "Ejecución": f"#{r['id']}", "Switch": r.get("hostname") or "-", "IP": r["switch_ip"],
+                "Estado": RUN_STATUS.get(r["status"], r["status"]),
+                "Puertos activos": f"{r['summary'].get('puertos_activos', '-')}/{r['summary'].get('puertos_total', '-')}",
+                "Hosts": r["summary"].get("hosts", "-"), "Vecinos": r["summary"].get("vecinos_infra", "-"),
+                "Error": r.get("error") or "",
+            } for r in done]), hide_index=True, width="stretch")
+            st.subheader("📑 Reporte de esta ejecución")
+            report_panel(done, project["name"], f"Ejecución del {batch['when']}", key="post")
+
+# ================================================================ Reporte =====
+with tab_rep:
+    if not runs:
+        st.info("Este proyecto aún no tiene ejecuciones. Ejecuta uno o varios switches para generar el reporte.")
+    else:
+        options = ["Proyecto completo (última ejecución de cada switch)"]
+        if batch and batch["pid"] == pid:
+            options.append(f"Última tanda ejecutada ({batch['when']})")
+        options.append("Una ejecución en particular")
+        scope = st.radio("Alcance del reporte", options, horizontal=True, key="rep_scope")
+        if scope.startswith("Proyecto completo"):
+            latest_ok = db.latest_runs_per_switch(pid)
+            names = {(r.get("hostname") or r["switch_ip"]).lower() for r in latest_ok}
+            # Switches cuyo último intento falló y nunca se recolectaron bien
+            failed_only = []
+            for r in runs:
+                k = (r.get("hostname") or r["switch_ip"]).lower()
+                if r["status"] == "error" and k not in names:
+                    failed_only.append(r)
+                    names.add(k)
+            report_panel(latest_ok + failed_only, project["name"], "Proyecto completo", key="rep_proj")
+        elif scope.startswith("Última tanda"):
+            report_panel([r for r in (db.get_run(i) for i in batch["ids"]) if r], project["name"],
+                         f"Ejecución del {batch['when']}", key="rep_batch")
+        else:
+            one = st.selectbox("Ejecución", runs, format_func=run_label, key="rep_one")
+            report_panel([one], f"{project['name']} · {one.get('hostname') or one['switch_ip']}",
+                         f"Ejecución #{one['id']}", key=f"rep_one_{one['id']}")
 
 # ============================================================ Resultados =====
 with tab_res:
@@ -452,7 +594,8 @@ with tab_res:
 
         with t_topo:
             if rows:
-                show_topology([(run, rows)], key=f"run{run['id']}")
+                show_topology([(run, rows)], key=f"run{run['id']}",
+                              title=run.get("hostname") or run["switch_ip"])
             else:
                 st.info("Sin datos de topología en esta ejecución.")
 
@@ -497,8 +640,8 @@ with tab_proj:
         m[5].metric("VLANs / SVIs", f"{ps['vlans_unicas']} / {ps['svis']}")
         st.caption("Topología consolidada: se usa la ejecución exitosa más reciente de cada switch, "
                    "y se unen entre sí cuando un switch aparece como vecino CDP/LLDP de otro.")
-        data = [(r, db.get_port_rows(r["id"])) for r in latest]
-        show_topology(data, key="project")
+        data = enrich_with_project_arp(db, [(r, db.get_port_rows(r["id"])) for r in latest])
+        show_topology(data, key="project", title=project["name"], hosts_default=False)
         st.markdown("#### Tabla consolidada del proyecto")
         all_rows = [{**row, "switch": r.get("hostname") or r["switch_ip"]} for r, rr in data for row in rr]
         dfp = rows_df(all_rows, with_switch=True)

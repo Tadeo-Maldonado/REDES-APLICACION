@@ -220,7 +220,8 @@ def summarize(rows: list[PortRow], data: ParsedData) -> dict:
     return {
         "puertos_total": len(by_port),
         "puertos_activos": sum(1 for s in by_port.values() if s == "up"),
-        "puertos_inactivos": sum(1 for s in by_port.values() if s in ("down", "disabled")),
+        "puertos_inactivos": sum(1 for s in by_port.values()
+                                 if s in ("down", "disabled", "err-disabled")),
         "vlans": len(data.vlans),
         "svis": sum(1 for v in data.vlans.values() if v.svi_ip),
         "hosts": sum(1 for r in rows if r.category == CAT_HOST),

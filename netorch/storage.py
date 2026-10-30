@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS port_rows (
 CREATE INDEX IF NOT EXISTS idx_ports_run ON port_rows(run_id);
 CREATE INDEX IF NOT EXISTS idx_ports_mac ON port_rows(mac);
 
+CREATE TABLE IF NOT EXISTS arp_entries (          -- ARP completa: permite resolver IPs entre switches
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    ip          TEXT NOT NULL,
+    mac         TEXT NOT NULL,
+    interface   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_arp_run ON arp_entries(run_id);
+
 CREATE TABLE IF NOT EXISTS vlans (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -150,7 +159,7 @@ class Storage:
     def finish_run(self, run_id: int, *, status: str, hostname: Optional[str] = None,
                    rows: Optional[list[PortRow]] = None, vlans: Optional[list[Vlan]] = None,
                    summary: Optional[dict] = None, warnings: Optional[list[str]] = None,
-                   error: Optional[str] = None) -> None:
+                   error: Optional[str] = None, arp: Optional[list] = None) -> None:
         with self.conn() as c:
             c.execute("""UPDATE runs SET status=?, hostname=COALESCE(?, hostname), finished_at=?,
                          summary=?, warnings=?, error=? WHERE id=?""",
@@ -165,6 +174,8 @@ class Storage:
             for v in vlans or []:
                 c.execute("INSERT INTO vlans(run_id, vlan_id, name, svi_ip) VALUES (?,?,?,?)",
                           (run_id, v.vlan_id, v.name, v.svi_ip))
+            c.executemany("INSERT INTO arp_entries(run_id, ip, mac, interface) VALUES (?,?,?,?)",
+                          [(run_id, a.ip, a.mac, a.interface) for a in arp or []])
 
     def list_runs(self, project_id: int) -> list[dict]:
         with self.conn() as c:
@@ -202,6 +213,14 @@ class Storage:
         with self.conn() as c:
             return [dict(r) for r in c.execute(
                 "SELECT * FROM vlans WHERE run_id=? ORDER BY vlan_id", (run_id,))]
+
+    def get_arp(self, run_ids: list[int]) -> list[dict]:
+        if not run_ids:
+            return []
+        marks = ",".join("?" * len(run_ids))
+        with self.conn() as c:
+            return [dict(r) for r in c.execute(
+                f"SELECT * FROM arp_entries WHERE run_id IN ({marks})", run_ids)]
 
     def latest_runs_per_switch(self, project_id: int) -> list[dict]:
         """La ejecución exitosa más reciente de cada switch del proyecto (vista consolidada)."""

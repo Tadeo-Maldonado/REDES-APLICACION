@@ -6,6 +6,32 @@ from .storage import Storage
 from .utils import short_hostname
 
 
+def enrich_with_project_arp(storage: Storage,
+                            runs_with_rows: list[tuple[dict, list[dict]]]) -> list[tuple[dict, list[dict]]]:
+    """Resuelve IPs de hosts usando la ARP de TODOS los switches del conjunto.
+
+    Un switch de acceso no tiene la ARP (el gateway está en el core): si el core también se
+    recolectó, la IP del host se toma de ahí. Devuelve copias de las filas con 'ip_source'.
+    """
+    runs = [r for r, _ in runs_with_rows]
+    names = {r["id"]: r.get("hostname") or r["switch_ip"] for r in runs}
+    ip_by_mac: dict[str, tuple[str, str]] = {}
+    for a in storage.get_arp([r["id"] for r in runs]):
+        ip_by_mac.setdefault(a["mac"], (a["ip"], names.get(a["run_id"], "")))
+    out = []
+    for run, rows in runs_with_rows:
+        new_rows = []
+        for row in rows:
+            row = dict(row)
+            if row["category"] == CAT_HOST and row["mac"] and not row["ip"] and row["mac"] in ip_by_mac:
+                ip, src = ip_by_mac[row["mac"]]
+                row["ip"], row["ip_source"] = ip, f"ARP de {src}"
+                row["method"] = f"{row['method']} · IP vía ARP de {src}"
+            new_rows.append(row)
+        out.append((run, new_rows))
+    return out
+
+
 def project_summary(storage: Storage, project_id: int) -> dict:
     """Acumulado del proyecto usando la última ejecución exitosa de cada switch."""
     runs = storage.latest_runs_per_switch(project_id)

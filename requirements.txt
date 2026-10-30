@@ -6,7 +6,8 @@ textfsm>=1.1
 # Interfaz gráfica y visualización
 streamlit>=1.50
 pandas>=2.0
-pyvis>=0.3.2
+pyvis>=0.3.2          # se usa su copia local de vis-network (funciona sin internet)
+openpyxl>=3.1
 
 # Pruebas
 pytest>=8.0

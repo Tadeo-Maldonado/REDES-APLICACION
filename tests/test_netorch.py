@@ -209,3 +209,71 @@ def test_run_many_parallel_isolates_failures(db):
     assert runs[4]["hostname"] == "SW-SIN-DEMO"
     assert set(seen) == set(range(5))
     assert len(db.latest_runs_per_switch(pid)) == 4
+
+
+# ------------------------------------------------ hallazgos y reporte -------
+def _project(db):
+    pid = db.create_project("Sede MTY")
+    for plat, ip in DEMOS:
+        demo_run(db, pid, plat, ip)
+    return pid
+
+
+def test_findings_and_cross_switch_ip(db):
+    from netorch.analysis import enrich_with_project_arp
+    from netorch.findings import project_findings
+    pid = _project(db)
+    latest = db.latest_runs_per_switch(pid)
+    data = enrich_with_project_arp(db, [(r, db.get_port_rows(r["id"])) for r in latest])
+    # Los hosts del Aruba toman su IP de la ARP del core
+    aruba = next(rows for run, rows in data if run["hostname"] == "SW-ACC-ARUBA-P1")
+    assert next(r for r in aruba if r["port"] == "1")["ip"] == "10.10.10.71"
+    titles = [(f.severity, f.title) for f in project_findings(data)]
+    assert ("Alta", "1 trunk(s) con tráfico pero sin vecino CDP/LLDP") in titles
+    assert any(s == "Info" and "sin recolectar" in t for s, t in titles)   # FW y router
+    no_ip = [t for s, t in titles if "sin IP" in t]
+    assert no_ip == ["1 host(s) sin IP resuelta"]                       # solo el de la VLAN 40
+
+
+def test_native_vlan_mismatch_detected():
+    from netorch.findings import project_findings
+    a = {"id": 1, "hostname": "SW-A", "switch_ip": "10.0.0.1", "summary": {}}
+    b = {"id": 2, "hostname": "SW-B", "switch_ip": "10.0.0.2", "summary": {}}
+    row = dict(category=CAT_INFRA, device_type="Switch", mac=None, method="LLDP", mac_count=1,
+               platform="", status="up")
+    ra = [{**row, "port": "Gi1/0/48", "vlan": "N:1 T:10", "name": "SW-B", "ip": "10.0.0.2",
+           "remote_port": "49"}]
+    rb = [{**row, "port": "49", "vlan": "N:99 T:10", "name": "SW-A", "ip": "10.0.0.1",
+           "remote_port": "Gi1/0/48"}]
+    f = [x for x in project_findings([(a, ra), (b, rb)]) if x.category == "VLANs"]
+    assert len(f) == 1 and "nativa" in f[0].title and f[0].severity == "Alta"
+
+
+def test_report_export_and_save(db, tmp_path):
+    import zipfile, io
+    from netorch.report import build_report_data, export_files, save_to_folder, to_zip
+    pid = _project(db)
+    rd = build_report_data(db, db.latest_runs_per_switch(pid), "Sede MTY", "Proyecto completo")
+    files = export_files(db, rd)
+    assert {"reporte.html", "reporte.xlsx", "topologia.html", "mapeo.csv"} <= set(files)
+    html = files["reporte.html"].decode()
+    assert "Hallazgos" in html and "SW-CORE-MTY" in html and "srcdoc" in html
+    assert files["reporte.xlsx"][:2] == b"PK"
+    dest = save_to_folder(files, tmp_path / "out")
+    assert (dest / "reporte.html").exists() and any((dest / "raw_logs").iterdir())
+    z = zipfile.ZipFile(io.BytesIO(to_zip(files)))
+    assert "reporte.html" in z.namelist()
+
+
+def test_tree_layout_has_no_overlaps(db):
+    from netorch.topology import compute_layout
+    pid = _project(db)
+    data = [(r, db.get_port_rows(r["id"])) for r in db.latest_runs_per_switch(pid)]
+    g = build_graph(data)
+    pos = compute_layout(g)
+    assert set(pos) == set(g.nodes)
+    coords = [(round(x), round(y)) for x, y in pos.values()]
+    assert len(coords) == len(set(coords))                     # ningún nodo encimado
+    core = pos["sw:sw-core-mty"]
+    assert pos["nb:fw-palo-mty"][1] < core[1]                  # firewall arriba del core
+    assert pos["sw:sw-acc-aruba-p1"][1] > core[1]              # acceso abajo

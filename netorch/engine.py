@@ -192,7 +192,8 @@ def run_collection(storage: Storage, project_id: int, target: Target,
         if not data.neighbors:
             warnings.append("No se detectaron vecinos CDP/LLDP (¿protocolo deshabilitado?).")
         storage.finish_run(run_id, status="ok", hostname=hostname, rows=rows,
-                           vlans=list(data.vlans.values()), summary=summary, warnings=warnings)
+                           vlans=list(data.vlans.values()), summary=summary, warnings=warnings,
+                           arp=data.arp)
         progress("Listo.", 1.0)
     except Exception as exc:
         log.exception("Fallo en la ejecución %s", run_id)
