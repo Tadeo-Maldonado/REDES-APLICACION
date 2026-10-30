@@ -259,7 +259,14 @@ def run_collection(storage: Storage, project_id: int, target: Target,
                            arp=data.arp)
         progress("Listo.", 1.0)
     except Exception as exc:
-        log.exception("Fallo en la ejecución %s", run_id)
+        # Fallas esperadas (switch apagado, credenciales, timeout): una línea en la terminal,
+        # sin traceback que asuste. Las inesperadas sí muestran el detalle completo.
+        expected = any(k in type(exc).__name__ for k in ("Timeout", "Authentication",
+                                                          "NoValidConnections", "ConnectionLost"))
+        if expected:
+            log.warning("%s (%s): %s", target.label, target.host, _friendly_error(exc))
+        else:
+            log.exception("Fallo en la ejecución %s", run_id)
         try:
             storage.finish_run(run_id, status="error", hostname=hostname or target.name,
                                error=_friendly_error(exc),
