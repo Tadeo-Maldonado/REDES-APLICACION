@@ -34,6 +34,7 @@ class Target:
     timeout: int = 20
     name: Optional[str] = None    # nombre que le da el usuario (SW1, Core MTY...)
     no_user: bool = False         # el equipo pide solo contraseña (sin usuario)
+    no_password: bool = False     # el equipo no pide nada (sin usuario ni contraseña)
 
     @property
     def label(self) -> str:
@@ -49,6 +50,25 @@ class Session(Protocol):
 # Comandos que pueden tardar en equipos grandes (miles de MACs/ARP)
 SLOW_KEYS = ("mac", "arp", "neighbors_cdp", "neighbors_lldp", "port_config")
 NO_USER_FALLBACK = "netorch"      # algunos servidores SSH no aceptan un usuario vacío
+
+
+def _no_auth_client_class():
+    """SSHClient de Paramiko que primero intenta la autenticación 'none' (equipos abiertos)."""
+    import paramiko
+
+    class NoAuthSSHClient(paramiko.SSHClient):
+        def _auth(self, username, password, *args, **kwargs):
+            try:
+                self._transport.auth_none(username or "")
+                if self._transport.is_authenticated():
+                    return
+            except paramiko.BadAuthenticationType:
+                pass                      # el servidor no permite 'none': se prueba vacío
+            except paramiko.AuthenticationException:
+                pass
+            return super()._auth(username, password or "", *args, **kwargs)
+
+    return NoAuthSSHClient
 
 
 class ConnectionLost(Exception):
@@ -80,15 +100,17 @@ class NetmikoSession:
             params.update(use_keys=True, key_file=target.key_file, allow_agent=False,
                           passphrase=target.key_passphrase or None)
         self.warnings: list[str] = []
+        if target.no_password and not target.key_file:
+            params.update(username="", password="")
         try:
-            self.conn = ConnectHandler(**params)
+            self.conn = self._connect(ConnectHandler, params, target.no_password)
         except NetmikoAuthenticationException:
             # Equipos con solo contraseña: el usuario se ignora, pero hay servidores SSH que
             # rechazan el usuario vacío. Se reintenta una vez con un usuario genérico.
             if not target.no_user:
                 raise
             params["username"] = NO_USER_FALLBACK
-            self.conn = ConnectHandler(**params)
+            self.conn = self._connect(ConnectHandler, params, target.no_password)
             self.warnings.append("El equipo no aceptó usuario vacío; se conectó con un usuario "
                                  "genérico y solo la contraseña.")
         if target.secret:
@@ -102,6 +124,18 @@ class NetmikoSession:
                                      "fallar. Agrega el enable password si el equipo lo usa.")
         except Exception:
             pass
+
+    @staticmethod
+    def _connect(handler, params: dict, no_auth: bool):
+        if not no_auth:
+            return handler(**params)
+        # Sin credenciales: se crea la conexión sin abrirla, se cambia el cliente SSH por uno
+        # que intenta auth 'none' (y luego contraseña vacía), y entonces se abre.
+        conn = handler(**params, auto_connect=False)
+        client_cls = _no_auth_client_class()
+        conn._get_ssh_client_instance = lambda: client_cls()
+        conn._open()
+        return conn
 
     def send(self, command: str, slow: bool = False) -> str:
         return self.conn.send_command(command, read_timeout=420 if slow else 180)

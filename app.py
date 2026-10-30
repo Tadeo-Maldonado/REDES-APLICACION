@@ -248,7 +248,21 @@ tab_run, tab_rep, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
 # ======================================================= Nueva ejecución =====
 CHOICES = platform_choices()
 LABEL_TO_KEY = {v: k for k, v in CHOICES.items()}
-COLS = ["Nombre", "IP", "Vendor / OS", "Puerto SSH", "Usuario (opcional)", "Sin usuario"]
+A_FULL, A_PASS, A_NONE = "Usuario y contraseña", "Solo contraseña", "Sin credenciales"
+ACCESS_MODES = [A_FULL, A_PASS, A_NONE]
+COLS = ["Nombre", "IP", "Vendor / OS", "Puerto SSH", "Acceso", "Usuario (opcional)"]
+
+
+def access_from_text(value) -> str:
+    """CSV/tabla -> modo de acceso. Acepta 'solo contraseña', 'sin credenciales', 'ninguno'..."""
+    t = clean_str(value).lower() if not isinstance(value, bool) else ""
+    if t in (m.lower() for m in ACCESS_MODES):
+        return next(m for m in ACCESS_MODES if m.lower() == t)
+    if any(k in t for k in ("sin cred", "ninguno", "none", "nada", "abierto", "sin auth")):
+        return A_NONE
+    if any(k in t for k in ("solo", "password", "contraseña", "pass")):
+        return A_PASS
+    return A_FULL
 
 
 def clean_str(value) -> str:
@@ -296,7 +310,7 @@ def new_table(df: pd.DataFrame):
 
 if "switch_table" not in st.session_state:
     new_table(table_from_records([{"Nombre": "SW1", "IP": "", "Vendor / OS": CHOICES["cisco_xe"],
-                                   "Puerto SSH": 22, "Usuario (opcional)": "", "Sin usuario": False}]))
+                                   "Puerto SSH": 22, "Acceso": A_FULL, "Usuario (opcional)": ""}]))
 
 with tab_run:
     st.subheader("1 · Switches a ejecutar")
@@ -306,12 +320,14 @@ with tab_run:
     if c1.button("🎬 Llenar con ejemplo demo", width="stretch"):
         new_table(table_from_records([
             {"Nombre": f"SW{i + 1}", "IP": ip, "Vendor / OS": CHOICES[plat], "Puerto SSH": 22,
-             "Usuario (opcional)": "", "Sin usuario": False}
+             "Acceso": A_FULL, "Usuario (opcional)": ""}
             for i, (plat, ip) in enumerate(DEMO_SET)]))
         st.rerun()
-    c2.download_button("⬇️ Plantilla CSV", "nombre,ip,vendor,puerto,usuario,sin_usuario\n"
-                       "SW1,10.0.0.1,Catalyst 9300,22,,\nSW2,10.0.0.2,Catalyst 2960,22,,si\n"
-                       "SW3,10.0.0.13,OS6860,22,,\n",
+    c2.download_button("⬇️ Plantilla CSV", "nombre,ip,vendor,puerto,usuario,acceso\n"
+                       "SW1,10.0.0.1,Catalyst 9300,22,,usuario y contraseña\n"
+                       "SW2,10.0.0.2,Catalyst 2960,22,,solo contraseña\n"
+                       "SW3,10.0.0.3,Aruba 2530,22,,sin credenciales\n"
+                       "SW4,10.0.0.13,OS6860,22,,\n",
                        file_name="inventario_switches.csv", width="stretch")
     csv_file = c3.file_uploader("Importar inventario CSV (sin contraseñas)", type=["csv"],
                                 label_visibility="collapsed")
@@ -329,7 +345,8 @@ with tab_run:
                              "Vendor / OS": CHOICES.get(key or "cisco_xe"),
                              "Puerto SSH": safe_int(r.get("puerto", ""), 22),
                              "Usuario (opcional)": clean_str(r.get("usuario", "") or r.get("user", "")),
-                             "Sin usuario": truthy(r.get("sin_usuario", ""))})
+                             "Acceso": (A_PASS if truthy(r.get("sin_usuario", ""))
+                                        else access_from_text(r.get("acceso", "")))})
             st.session_state.csv_loaded = csv_file.file_id
             new_table(table_from_records(recs))
             if bad:
@@ -354,8 +371,10 @@ with tab_run:
                                                         default=22),
             "Usuario (opcional)": st.column_config.TextColumn(
                 help="Solo si este switch usa un usuario distinto al común"),
-            "Sin usuario": st.column_config.CheckboxColumn(
-                help="Márcalo si el switch pide solo contraseña (no usa usuario)", default=False),
+            "Acceso": st.column_config.SelectboxColumn(
+                options=ACCESS_MODES, default=A_FULL, required=True,
+                help="Cómo entra el switch: usuario y contraseña, solo contraseña, o sin "
+                     "credenciales (no pide nada)"),
         })
     rows_in = []
     for r in edited.to_dict("records"):
@@ -363,7 +382,7 @@ with tab_run:
                "Vendor / OS": clean_str(r.get("Vendor / OS")),
                "Puerto SSH": safe_int(r.get("Puerto SSH"), 22),
                "Usuario (opcional)": clean_str(r.get("Usuario (opcional)")),
-               "Sin usuario": truthy(r.get("Sin usuario"))}
+               "Acceso": access_from_text(r.get("Acceso"))}
         if row["IP"] or row["Nombre"]:
             rows_in.append(row)
 
@@ -374,29 +393,37 @@ with tab_run:
     common = {}
     per_switch: dict[int, dict] = {}
     if cred_mode == "Las mismas para todos":
-        common["no_user"] = st.checkbox(
-            "Sin usuario (los switches piden solo contraseña)", key="common_no_user",
-            help="Para equipos con solo password de línea/manager. También puedes marcarlo por "
-                 "switch en la columna «Sin usuario» de la tabla.")
+        override = st.selectbox(
+            "Tipo de acceso", ["Según la columna «Acceso» de la tabla"] + ACCESS_MODES,
+            key="common_access",
+            help="Aplica un tipo de acceso a todos los switches, o respeta lo que diga cada fila.")
+        common["access"] = None if override.startswith("Según") else override
+        modes = {common["access"] or r["Acceso"] for r in rows_in} or {A_FULL}
+        need_user, need_pass = A_FULL in modes, bool(modes & {A_FULL, A_PASS})
+        if modes == {A_NONE}:
+            st.info("Sin credenciales: la app se conecta por SSH sin usuario ni contraseña.")
         c4, c5, c6 = st.columns(3)
-        common["user"] = c4.text_input("Usuario", disabled=common["no_user"],
-                                       placeholder="(sin usuario)" if common["no_user"] else "")
-        common["password"] = c5.text_input("Contraseña", type="password")
+        common["user"] = c4.text_input("Usuario", disabled=not need_user,
+                                       placeholder="" if need_user else "(no se usa)")
+        common["password"] = c5.text_input("Contraseña", type="password", disabled=not need_pass,
+                                           placeholder="" if need_pass else "(no se usa)")
         common["secret"] = c6.text_input("Enable password (si aplica)", type="password")
     else:
         if not rows_in:
             st.info("Primero agrega switches en la tabla.")
         for i, r in enumerate(rows_in):
             label = r["Nombre"] or f"Switch {i + 1}"
-            c4, c5, c6, c7, c8 = st.columns([1.2, 0.7, 1.2, 1.2, 1.2])
+            c4, c5, c6, c7, c8 = st.columns([1.1, 1.1, 1.1, 1.1, 1.1])
             c4.markdown(f"**{label}**  \n`{r['IP'] or 'sin IP'}`")
             uid = f"{i}_{r['IP']}"
-            no_user = c5.checkbox("Sin usuario", value=r["Sin usuario"], key=f"nu_{uid}")
+            access = c5.selectbox("Acceso", ACCESS_MODES, index=ACCESS_MODES.index(r["Acceso"]),
+                                  key=f"ac_{uid}")
             per_switch[i] = {
-                "no_user": no_user,
+                "access": access,
                 "user": c6.text_input("Usuario", value=r["Usuario (opcional)"], key=f"u_{uid}",
-                                      disabled=no_user),
-                "password": c7.text_input("Contraseña", type="password", key=f"p_{uid}"),
+                                      disabled=access != A_FULL),
+                "password": c7.text_input("Contraseña", type="password", key=f"p_{uid}",
+                                          disabled=access == A_NONE),
                 "secret": c8.text_input("Enable", type="password", key=f"e_{uid}"),
             }
     with st.expander("🔑 Llave SSH privada (opcional, aplica a todos)"):
@@ -425,13 +452,16 @@ with tab_run:
             plat = LABEL_TO_KEY.get(r["Vendor / OS"])
             if cred_mode == "Las mismas para todos":
                 creds = common
-                no_user = common.get("no_user") or r["Sin usuario"]
+                access = common.get("access") or r["Acceso"]
                 user = r["Usuario (opcional)"] or common.get("user", "")
             else:
                 creds = per_switch.get(i, {})
-                no_user = creds.get("no_user", False)
+                access = creds.get("access", A_FULL)
                 user = creds.get("user", "")
+            no_user = access in (A_PASS, A_NONE)
+            no_password = access == A_NONE
             user = "" if no_user else user.strip()
+            password = "" if no_password else creds.get("password", "")
             if not plat:
                 errors.append(f"{label}: elige el vendor / OS.")
             if not demo:
@@ -441,16 +471,19 @@ with tab_run:
                     errors.append(f"{label}: la IP «{ip}» no es válida.")
                 if ip in seen:
                     errors.append(f"{label}: la IP {ip} está repetida.")
-                if not user and not no_user:
-                    errors.append(f"{label}: falta el usuario SSH (o marca «Sin usuario»).")
-                if not creds.get("password") and not key_upload:
-                    errors.append(f"{label}: falta contraseña (o una llave SSH).")
+                if access == A_FULL and not user:
+                    errors.append(f"{label}: falta el usuario SSH (o cambia el acceso a "
+                                  "«Solo contraseña» / «Sin credenciales»).")
+                if access != A_NONE and not password and not key_upload:
+                    errors.append(f"{label}: falta contraseña (o una llave SSH, o acceso "
+                                  "«Sin credenciales»).")
             seen.add(ip)
             targets.append(Target(host=ip or f"demo-{i + 1}", platform=plat or "cisco_xe",
-                                  username=user, password=creds.get("password", ""),
+                                  username=user, password=password,
                                   secret=creds.get("secret", ""), port=r["Puerto SSH"],
                                   key_passphrase=key_pass or None, timeout=int(timeout),
-                                  name=r["Nombre"] or None, no_user=bool(no_user)))
+                                  name=r["Nombre"] or None, no_user=no_user,
+                                  no_password=no_password))
         if errors:
             for e in errors:
                 st.error(e)

@@ -32,7 +32,7 @@ usando salidas de ejemplo, para explorar todas las vistas. También puedes marca
 | Sección | Contenido |
 |---|---|
 | **Proyectos** (barra lateral) | Crear, alternar y borrar proyectos. Cada proyecto acumula sus ejecuciones de forma aislada. |
-| **🚀 Nueva ejecución** | Tabla de **varios switches** (con casilla **«Sin usuario»** para equipos que solo piden contraseña) (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
+| **🚀 Nueva ejecución** | Tabla de **varios switches** (columna **«Acceso»**: usuario y contraseña, solo contraseña o sin credenciales) (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
 | **📑 Reporte** | Aparece solo al terminar cada ejecución y en su propia pestaña (proyecto completo, última tanda o una ejecución): métricas, **hallazgos con severidad y recomendación**, **diagrama de red** y **exportación**. |
 | **📋 Resultados por switch** | Las 4 capas: **Resumen ejecutivo** (switch + acumulado del proyecto), **Tabla consolidada de mapeo**, **Topología** interactiva y **Raw logs** (auditoría, descargables). Además VLANs/SVIs. |
 | **🗺️ Topología del proyecto** | Une la última ejecución de cada switch en un solo diagrama: si un switch escaneado aparece como vecino de otro, se "cosen" por IP de gestión o hostname. |
@@ -152,12 +152,18 @@ projects (id, name UNIQUE, description, created_at)
 Borrar un proyecto borra en cascada sus ejecuciones. Para usar otra base:
 `NETORCH_DB=/ruta/otra.db streamlit run app.py`.
 
-## Equipos sin usuario (solo contraseña)
+## Tipo de acceso por switch
 
-Marca **«Sin usuario»** en la tabla, en las credenciales comunes o por switch. La app se
-conecta por SSH con usuario vacío y la contraseña; si el servidor SSH del equipo no acepta un
-usuario vacío, reintenta una vez con un usuario genérico (los equipos que solo validan la
-contraseña lo ignoran).
+Columna **«Acceso»** en la tabla (o un tipo para todos en «Credenciales»):
+
+| Acceso | Qué hace |
+|---|---|
+| Usuario y contraseña | Lo normal. |
+| Solo contraseña | Se conecta con usuario vacío y la contraseña; si el servidor SSH rechaza el usuario vacío, reintenta una vez con un usuario genérico (que estos equipos ignoran). |
+| Sin credenciales | Para equipos que no piden nada: intenta la autenticación SSH *none* y, si no la permite, contraseña vacía. |
+
+En el CSV: columna `acceso` con `usuario y contraseña`, `solo contraseña` o `sin credenciales`.
+Estos tres modos se prueban contra un servidor SSH real en `tests/test_ssh_auth.py`.
 
 ## Robustez
 
