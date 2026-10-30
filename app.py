@@ -22,6 +22,7 @@ from netorch.report import (build_report_data, default_export_dir, export_files,
                             save_to_folder, slug)
 from netorch.commands import platform_choices, platform_from_text, platform_label
 from netorch.engine import DemoSession, NetmikoSession, Target, run_many
+from netorch.netdiag import AUTO, local_interfaces, probe_many
 from netorch.models import CAT_DOWN
 from netorch.storage import DEFAULT_DB, Storage
 from netorch.topology import build_graph, render_html
@@ -438,11 +439,51 @@ with tab_run:
     timeout = c9.number_input("Timeout SSH (s)", min_value=5, max_value=120, value=20)
     workers = c10.number_input("Switches en paralelo", min_value=1, max_value=10, value=4,
                                help="Cuántas sesiones SSH simultáneas abrir")
+    ifaces = local_interfaces()
+    src_options = [AUTO] + [ip for _, ip in ifaces]
+    src_names = {AUTO: "Automática (según la tabla de rutas de este equipo)"}
+    src_names.update({ip: f"{name} — {ip}" for name, ip in ifaces})
+    source_ip = st.selectbox(
+        "IP / tarjeta de red de origen", src_options, format_func=lambda x: src_names.get(x, x),
+        key="source_ip",
+        help="Por dónde sale la conexión SSH. Si llegas al switch por VPN y la app no, elige la "
+             "tarjeta de la VPN. Usa «Probar conectividad» para ver qué IP usa la app.")
     demo = st.checkbox("Modo demo: usar salidas de ejemplo de cada plataforma (sin conectarse)")
 
     n = len(rows_in)
-    go = st.button(f"▶️ Ejecutar recolección en {n} switch{'es' if n != 1 else ''}", type="primary",
-                   width="stretch", disabled=n == 0)
+    cprobe, cgo = st.columns([1, 3])
+    probe_btn = cprobe.button("🩺 Probar conectividad", width="stretch", disabled=n == 0,
+                              help="Prueba TCP y banner SSH a cada switch, sin iniciar sesión")
+    go = cgo.button(f"▶️ Ejecutar recolección en {n} switch{'es' if n != 1 else ''}", type="primary",
+                    width="stretch", disabled=n == 0)
+
+    if probe_btn:
+        valid, bad_ips = [], []
+        for r in rows_in:
+            try:
+                ipaddress.ip_address(r["IP"])
+                valid.append(r)
+            except ValueError:
+                bad_ips.append(r["Nombre"] or r["IP"] or "?")
+        if bad_ips:
+            st.warning("Se omiten filas sin IP válida: " + ", ".join(bad_ips))
+        with st.spinner("Probando conectividad…"):
+            results = probe_many([(r["IP"], r["Puerto SSH"]) for r in valid],
+                                 timeout=min(float(timeout), 8.0), source_ip=source_ip)
+        st.session_state.probe_results = [
+            {"Switch": r["Nombre"] or r["IP"], "IP": p.host, "Puerto": p.port,
+             "Origen (IP local)": p.source_ip or "sin ruta",
+             "Tarjeta": p.source_iface or "—",
+             "TCP": {"ok": "✅ abre", "timeout": "⏱️ sin respuesta", "rechazado": "⛔ rechazado"}
+             .get(p.tcp, "❌ error"),
+             "ms": p.ms, "Banner": p.banner or "—", "Diagnóstico": p.diagnosis}
+            for r, p in zip(valid, results)]
+    if st.session_state.get("probe_results"):
+        st.markdown("##### 🩺 Conectividad")
+        st.dataframe(pd.DataFrame(st.session_state.probe_results), hide_index=True, width="stretch",
+                     column_config={"Diagnóstico": st.column_config.TextColumn(width="large")})
+        st.caption("«Origen» es la IP con la que la app sale hacia cada switch. Compárala con la que "
+                   "usa PuTTY: en PowerShell, `Find-NetRoute -RemoteIPAddress <ip_del_switch>`.")
 
     if go:
         errors, targets, seen = [], [], set()
@@ -483,7 +524,8 @@ with tab_run:
                                   secret=creds.get("secret", ""), port=r["Puerto SSH"],
                                   key_passphrase=key_pass or None, timeout=int(timeout),
                                   name=r["Nombre"] or None, no_user=no_user,
-                                  no_password=no_password))
+                                  no_password=no_password,
+                                  source_ip="" if demo else source_ip))
         if errors:
             for e in errors:
                 st.error(e)

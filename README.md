@@ -165,6 +165,21 @@ Columna **«Acceso»** en la tabla (o un tipo para todos en «Credenciales»):
 En el CSV: columna `acceso` con `usuario y contraseña`, `solo contraseña` o `sin credenciales`.
 Estos tres modos se prueban contra un servidor SSH real en `tests/test_ssh_auth.py`.
 
+## Conectividad: IP de origen y diagnóstico (VPN)
+
+- **🩺 Probar conectividad** (junto al botón de ejecutar): para cada switch muestra la **IP local
+  con la que sale la app** y su tarjeta de red, si el puerto TCP abre, el banner SSH
+  (p. ej. `SSH-2.0-Cisco-1.25`) y un diagnóstico en lenguaje claro. No inicia sesión.
+- **IP / tarjeta de red de origen**: «Automática» (tabla de rutas del equipo) o una tarjeta
+  concreta, p. ej. la de la VPN. La conexión SSH se enlaza a esa IP.
+- Cada ejecución registra el origen usado («Origen de la conexión: …») y, si falla, el error lo
+  incluye (`[origen 10.x.x.x]`).
+
+Si PuTTY entra y la app no: revisa en PuTTY *Connection › Proxy* y el puerto de la sesión
+guardada; si tu VPN hace *split tunnel* por aplicación, agrega `python.exe`; o elige como origen
+la IP de la VPN. En PowerShell, `Find-NetRoute -RemoteIPAddress <ip>` muestra la IP que usa
+Windows y `Test-NetConnection <ip> -Port 22` prueba el puerto.
+
 ## Robustez
 
 - Cada comando se ejecuta aislado: si uno tarda demasiado o falla, se registra en Raw logs y

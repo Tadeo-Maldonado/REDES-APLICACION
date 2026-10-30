@@ -35,6 +35,7 @@ class Target:
     name: Optional[str] = None    # nombre que le da el usuario (SW1, Core MTY...)
     no_user: bool = False         # el equipo pide solo contraseña (sin usuario)
     no_password: bool = False     # el equipo no pide nada (sin usuario ni contraseña)
+    source_ip: str = ""           # IP local de salida (tarjeta/VPN); "" = automática
 
     @property
     def label(self) -> str:
@@ -102,15 +103,16 @@ class NetmikoSession:
         self.warnings: list[str] = []
         if target.no_password and not target.key_file:
             params.update(username="", password="")
+        self.target = target
         try:
-            self.conn = self._connect(ConnectHandler, params, target.no_password)
+            self.conn = self._connect(ConnectHandler, params, target.no_password, target)
         except NetmikoAuthenticationException:
             # Equipos con solo contraseña: el usuario se ignora, pero hay servidores SSH que
             # rechazan el usuario vacío. Se reintenta una vez con un usuario genérico.
             if not target.no_user:
                 raise
             params["username"] = NO_USER_FALLBACK
-            self.conn = self._connect(ConnectHandler, params, target.no_password)
+            self.conn = self._connect(ConnectHandler, params, target.no_password, target)
             self.warnings.append("El equipo no aceptó usuario vacío; se conectó con un usuario "
                                  "genérico y solo la contraseña.")
         if target.secret:
@@ -126,7 +128,13 @@ class NetmikoSession:
             pass
 
     @staticmethod
-    def _connect(handler, params: dict, no_auth: bool):
+    def _connect(handler, params: dict, no_auth: bool, target: Optional[Target] = None):
+        params = dict(params)
+        if target is not None and target.source_ip:
+            # Salir por una tarjeta/IP concreta (p. ej. la de la VPN)
+            from .netdiag import open_socket
+            params["sock"] = open_socket(target.host, int(target.port or 22),
+                                         target.timeout, target.source_ip)
         if not no_auth:
             return handler(**params)
         # Sin credenciales: se crea la conexión sin abrirla, se cambia el cliente SSH por uno
@@ -196,8 +204,15 @@ def _friendly_error(exc: Exception) -> str:
         return f"La conexión SSH se cayó antes de obtener datos: {exc}"
     if "Authentication" in name:
         return "Autenticación SSH fallida: revisa usuario, contraseña o llave."
-    if "Timeout" in name or "timed out" in str(exc).lower():
-        return "Sin respuesta SSH (timeout): revisa IP, puerto, ACLs o firewall intermedio."
+    low = str(exc).lower()
+    if "10049" in low or "assign requested address" in low:
+        return ("La IP de origen elegida no pertenece a este equipo (¿se desconectó la VPN?). "
+                "Elige otra tarjeta o «Automática».")
+    if "10051" in low or "unreachable" in low:
+        return "No hay ruta hacia el switch: revisa que la VPN esté conectada."
+    if "Timeout" in name or "timed out" in low:
+        return ("Sin respuesta SSH (timeout): revisa IP, puerto, VPN, ACLs o firewall intermedio. "
+                "Usa «🩺 Probar conectividad» para ver por qué IP sale la app.")
     if "NoValidConnections" in name or "refused" in str(exc).lower():
         return "Conexión rechazada: el puerto SSH no está abierto en el equipo."
     return f"{name}: {exc}"
@@ -216,11 +231,17 @@ def run_collection(storage: Storage, project_id: int, target: Target,
     seq = 0
     session: Optional[Session] = None
     hostname = None
+    from .netdiag import interface_of, route_source_ip
+    origin = target.source_ip or route_source_ip(target.host, target.port) or "?"
+    iface = interface_of(origin)
+    origin_txt = f"{origin}{f' ({iface})' if iface else ''}"
     try:
-        progress(f"Conectando por SSH a {target.host}:{target.port}…", 0.02)
+        progress(f"Conectando por SSH a {target.host}:{target.port} desde {origin_txt}…", 0.02)
         session = session_factory(target)
         hostname = session.hostname() or target.name
         warnings = list(getattr(session, "warnings", []))
+        warnings.insert(0, f"Origen de la conexión: {origin_txt}"
+                           + (" (elegido manualmente)" if target.source_ip else " (automático)"))
         outputs: dict[str, str] = {}
 
         steps = [k for k in platform.commands if k != "vlan_detail"]
@@ -298,12 +319,13 @@ def run_collection(storage: Storage, project_id: int, target: Target,
         expected = any(k in type(exc).__name__ for k in ("Timeout", "Authentication",
                                                           "NoValidConnections", "ConnectionLost"))
         if expected:
-            log.warning("%s (%s): %s", target.label, target.host, _friendly_error(exc))
+            log.warning("%s (%s) desde %s: %s", target.label, target.host, origin_txt,
+                        _friendly_error(exc))
         else:
             log.exception("Fallo en la ejecución %s", run_id)
         try:
             storage.finish_run(run_id, status="error", hostname=hostname or target.name,
-                               error=_friendly_error(exc),
+                               error=f"{_friendly_error(exc)} [origen {origin_txt}]",
                                warnings=[f"Detalle técnico: {type(exc).__name__}: {exc}"])
         except Exception:
             log.exception("No se pudo registrar el error de la ejecución %s", run_id)

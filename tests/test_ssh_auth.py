@@ -5,6 +5,8 @@ import threading
 import paramiko
 import pytest
 
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+
 from netorch.engine import NetmikoSession, Target
 
 PROMPT = b"SW-ABIERTO#"
@@ -103,3 +105,45 @@ def test_password_only_connects():
         s.close()
     finally:
         srv.close()
+
+
+# ------------------------------------------------- IP de origen / diagnóstico --
+def test_connect_from_chosen_source_ip():
+    srv = _serve("password:x")
+    try:
+        port = srv.getsockname()[1]
+        s = NetmikoSession(Target(host="127.0.0.1", port=port, platform="cisco_ios", username="u",
+                                  password="x", source_ip="127.0.0.1", timeout=10))
+        assert s.hostname() == "SW-ABIERTO"
+        assert s.conn.remote_conn.get_transport().sock.getsockname()[0] == "127.0.0.1"
+        s.close()
+    finally:
+        srv.close()
+
+
+def test_probe_reports_ssh_banner_and_origin():
+    from netorch.netdiag import probe
+    srv = _serve("none")
+    try:
+        r = probe("127.0.0.1", srv.getsockname()[1], timeout=5)
+        assert r.tcp == "ok" and r.banner.startswith("SSH-2.0") and r.source_ip == "127.0.0.1"
+        assert r.diagnosis.startswith("✅")
+    finally:
+        srv.close()
+    closed = probe("127.0.0.1", 1, timeout=2)
+    assert closed.tcp == "rechazado" and "rechaza" in closed.diagnosis
+
+
+def test_bad_source_ip_gives_clear_error(tmp_path):
+    from netorch.engine import run_collection
+    from netorch.storage import Storage
+    from netorch.netdiag import probe
+    r = probe("127.0.0.1", 22, timeout=2, source_ip="203.0.113.77")   # IP que no es de este equipo
+    assert r.tcp == "error"
+    db = Storage(tmp_path / "t.db")
+    pid = db.create_project("p")
+    rid = run_collection(db, pid, Target(host="127.0.0.1", port=22, platform="cisco_ios",
+                                         username="u", password="x", source_ip="203.0.113.77",
+                                         timeout=3))
+    run = db.get_run(rid)
+    assert run["status"] == "error" and "origen 203.0.113.77" in run["error"]

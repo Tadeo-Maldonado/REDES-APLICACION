@@ -2,6 +2,7 @@
 netmiko>=4.4
 ntc-templates>=4.0
 textfsm>=1.1
+psutil>=5.9           # listar tarjetas de red (IP de origen)
 
 # Interfaz gráfica y visualización
 streamlit>=1.50
