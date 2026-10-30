@@ -1,5 +1,5 @@
 """Decide si una MAC es PC, SW o FW. Reglas simples y fáciles de ajustar."""
-from .models import Connection
+from models import Connection
 
 FW_KEYWORDS = ("fortigate", "palo alto", "pan-os", "asa", "firepower", "sophos", "checkpoint")
 SW_KEYWORDS = ("switch", "aos", "arubaos", "ios", "catalyst", "omniswitch")

@@ -1,5 +1,2 @@
-.env
-backend/switches.yaml
 __pycache__/
-.venv/
 node_modules/

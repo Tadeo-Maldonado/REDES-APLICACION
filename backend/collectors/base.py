@@ -2,8 +2,8 @@
 from abc import ABC, abstractmethod
 from netmiko import ConnectHandler
 
-from ..models import Connection
-from ..classifier import classify
+from models import Connection
+from classifier import classify
 
 
 class BaseCollector(ABC):
