@@ -1,0 +1,10 @@
+# Servidor API
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# Conexión SSH a los switches (Cisco, Aruba, Alcatel)
+netmiko>=4.4
+
+# Configuración (inventario de switches y variables de entorno)
+pyyaml>=6.0
+python-dotenv>=1.0
