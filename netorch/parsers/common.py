@@ -160,3 +160,23 @@ def tagging_mode(iface) -> Optional[str]:
     if iface.access_vlan is not None:
         return "access"
     return None
+
+
+class Guard:
+    """Ejecuta cada sección del parseo aislada: si una falla, se registra y sigue el resto.
+
+    Así una salida inesperada de un comando nunca tumba toda la ejecución.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __call__(self, section: str, fn, *args, default=None):
+        try:
+            return fn(*args)
+        except Exception as exc:              # noqa: BLE001 - se reporta como advertencia
+            log.warning("Parser %s falló: %s", section, exc, exc_info=True)
+            self.data.warnings.append(
+                f"No se pudo interpretar «{section}» ({type(exc).__name__}: {exc}). "
+                "La salida cruda quedó en Raw logs.")
+            return default

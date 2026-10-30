@@ -8,7 +8,7 @@ import re
 
 from ..models import Interface, MacEntry, Neighbor, ParsedData, Vlan
 from ..utils import IPV4, MAC_ANY, normalize_mac
-from .common import tagging_mode, clean_mac_entries, first_ip, generic_arp, normalize_caps, textfsm_macs
+from .common import Guard, tagging_mode, clean_mac_entries, first_ip, generic_arp, normalize_caps, textfsm_macs
 
 PORT_RE = r"\d+/\d+(?:/\d+)?"
 
@@ -184,13 +184,15 @@ def parse_svis(text: str, vlans: dict[int, Vlan]) -> None:
 
 def parse(outputs: dict[str, str], platform: str) -> ParsedData:
     data = ParsedData()
-    data.neighbors = parse_lldp(outputs.get("neighbors_lldp", ""))
-    data.macs = parse_mac(outputs.get("mac", ""))
-    data.arp = generic_arp(outputs.get("arp", ""))
-    data.interfaces = parse_interfaces(outputs.get("interfaces", ""))
-    apply_link_status(outputs.get("link_status", ""), data.interfaces)
-    apply_vlan_ports(outputs.get("vlan_ports", ""), data.interfaces)
-    data.vlans = parse_vlans(outputs.get("vlans", ""))
-    parse_svis(outputs.get("svis", ""), data.vlans)
-    data.lags = parse_linkagg_ports(outputs.get("lags", ""))
+    g = Guard(data)
+    data.neighbors = g("LLDP", parse_lldp, outputs.get("neighbors_lldp", ""), default=[])
+    data.macs = g("tabla MAC", parse_mac, outputs.get("mac", ""), default=[])
+    data.arp = g("tabla ARP", generic_arp, outputs.get("arp", ""), default=[])
+    data.interfaces = g("estado de puertos", parse_interfaces, outputs.get("interfaces", ""),
+                        default={})
+    g("estado de enlace", apply_link_status, outputs.get("link_status", ""), data.interfaces)
+    g("VLANs por puerto", apply_vlan_ports, outputs.get("vlan_ports", ""), data.interfaces)
+    data.vlans = g("VLANs", parse_vlans, outputs.get("vlans", ""), default={})
+    g("SVIs", parse_svis, outputs.get("svis", ""), data.vlans)
+    data.lags = g("linkagg", parse_linkagg_ports, outputs.get("lags", ""), default={})
     return data

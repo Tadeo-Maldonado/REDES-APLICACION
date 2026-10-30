@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from .analysis import enrich_with_project_arp
-from .commands import PLATFORMS
+from .commands import platform_label
 from .findings import SEVERITY_ICON, Finding, project_findings, severity_counts
 from .icons import icon_data_uri
 from .models import CAT_DOWN, CAT_HOST, CAT_INFRA, CAT_UNMANAGED
@@ -96,6 +96,16 @@ def topology_html(rd: ReportData, show_hosts: bool = True, height: int = 640,
 
 
 # ------------------------------------------------------------------ Excel ---
+_XL_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xl_safe(value):
+    """Excel rechaza caracteres de control (pueden venir en descripciones LLDP) y >32k chars."""
+    if isinstance(value, str):
+        value = _XL_ILLEGAL.sub(" ", value)
+        return value[:32000]
+    return value
+
 def to_excel(rd: ReportData) -> bytes:
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -107,7 +117,7 @@ def to_excel(rd: ReportData) -> bytes:
                            + [{"Dato": k, "Valor": v} for k, v in rd.metrics.items()])
     runs = pd.DataFrame([{
         "Ejecución": r["id"], "Switch": sw_name(r), "IP": r["switch_ip"],
-        "Plataforma": PLATFORMS[r["platform"]].label, "Fecha": r["started_at"].replace("T", " "),
+        "Plataforma": platform_label(r["platform"]), "Fecha": r["started_at"].replace("T", " "),
         "Estado": r["status"], "Error": r.get("error") or "",
     } for r in [x for x, _ in rd.runs_with_rows] + rd.failed])
     vlans = pd.DataFrame([{"Switch": sw_name(run), "VLAN": v["vlan_id"], "Nombre": v["name"],
@@ -118,6 +128,9 @@ def to_excel(rd: ReportData) -> bytes:
     sev_fill = {"Alta": "FEE2E2", "Media": "FFEDD5", "Baja": "FEF9C3", "Info": "DBEAFE"}
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
         for name, df in sheets.items():
+            if df.empty and not len(df.columns):
+                df = pd.DataFrame({"Info": ["Sin datos"]})
+            df = df.map(_xl_safe) if hasattr(df, "map") else df.applymap(_xl_safe)
             df.to_excel(xw, sheet_name=name, index=False)
             ws = xw.sheets[name]
             for cell in ws[1]:
@@ -173,7 +186,7 @@ def to_html(rd: ReportData) -> str:
         switches.append(f"""
         <section class="sw">
           <h3><img src="{icon_data_uri('Escaneado')}"/> {_e(sw_name(run))}
-            <small>{_e(run['switch_ip'])} · {_e(PLATFORMS[run['platform']].label)} ·
+            <small>{_e(run['switch_ip'])} · {_e(platform_label(run['platform']))} ·
             {_e(run['started_at'].replace('T', ' '))}</small></h3>
           <div class="mini">
             <span>Puertos activos <b>{s.get('puertos_activos', 0)}/{s.get('puertos_total', 0)}</b></span>

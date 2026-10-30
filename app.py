@@ -20,7 +20,7 @@ from netorch.analysis import diff_runs, enrich_with_project_arp, project_summary
 from netorch.findings import SEVERITY_ICON, severity_counts
 from netorch.report import (build_report_data, default_export_dir, export_files, open_folder,
                             save_to_folder, slug)
-from netorch.commands import PLATFORMS, platform_choices
+from netorch.commands import platform_choices, platform_from_text, platform_label
 from netorch.engine import DemoSession, NetmikoSession, Target, run_many
 from netorch.models import CAT_DOWN
 from netorch.storage import DEFAULT_DB, Storage
@@ -248,30 +248,41 @@ tab_run, tab_rep, tab_res, tab_proj, tab_cmp, tab_hist = st.tabs(
 # ======================================================= Nueva ejecución =====
 CHOICES = platform_choices()
 LABEL_TO_KEY = {v: k for k, v in CHOICES.items()}
-COLS = ["Nombre", "IP", "Vendor / OS", "Puerto SSH", "Usuario (opcional)"]
+COLS = ["Nombre", "IP", "Vendor / OS", "Puerto SSH", "Usuario (opcional)", "Sin usuario"]
 
 
-def vendor_from_text(text: str) -> str | None:
-    """Acepta la clave, la etiqueta o algo aproximado: 'cisco', 'nxos', 'aruba cx', 'OS6860'..."""
-    t = str(text or "").strip().lower()
-    if not t:
-        return None
-    if t in CHOICES:
-        return t
-    for label, key in LABEL_TO_KEY.items():
-        if t == label.lower():
-            return key
-    if "nx" in t:
-        return "cisco_nxos"
-    if "cisco" in t or "ios" in t:
-        return "cisco_ios"
-    if "cx" in t:
-        return "aruba_aoscx"
-    if "aruba" in t or "procurve" in t or "aos-s" in t or t in ("hp", "hpe"):
-        return "aruba_aoss"
-    if "alcatel" in t or "omni" in t or t.startswith("os6") or t.startswith("os9") or "ale" == t:
-        return "alcatel_aos"
-    return None
+def clean_str(value) -> str:
+    """Celdas vacías del editor llegan como None o NaN: siempre devolver texto limpio."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def safe_int(value, default: int, lo: int = 1, hi: int = 65535) -> int:
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return n if lo <= n <= hi else default
+
+
+def truthy(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "si", "sí", "true", "yes", "x")
+    try:
+        return bool(value) and not pd.isna(value)
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def vendor_from_text(text) -> str | None:
+    return platform_from_text(text)
 
 
 def table_from_records(records: list[dict]) -> pd.DataFrame:
@@ -284,8 +295,8 @@ def new_table(df: pd.DataFrame):
 
 
 if "switch_table" not in st.session_state:
-    new_table(table_from_records([{"Nombre": "SW1", "IP": "", "Vendor / OS": CHOICES["cisco_ios"],
-                                   "Puerto SSH": 22, "Usuario (opcional)": ""}]))
+    new_table(table_from_records([{"Nombre": "SW1", "IP": "", "Vendor / OS": CHOICES["cisco_xe"],
+                                   "Puerto SSH": 22, "Usuario (opcional)": "", "Sin usuario": False}]))
 
 with tab_run:
     st.subheader("1 · Switches a ejecutar")
@@ -295,10 +306,12 @@ with tab_run:
     if c1.button("🎬 Llenar con ejemplo demo", width="stretch"):
         new_table(table_from_records([
             {"Nombre": f"SW{i + 1}", "IP": ip, "Vendor / OS": CHOICES[plat], "Puerto SSH": 22,
-             "Usuario (opcional)": ""} for i, (plat, ip) in enumerate(DEMO_SET)]))
+             "Usuario (opcional)": "", "Sin usuario": False}
+            for i, (plat, ip) in enumerate(DEMO_SET)]))
         st.rerun()
-    c2.download_button("⬇️ Plantilla CSV", "nombre,ip,vendor,puerto,usuario\n"
-                       "SW1,10.0.0.1,cisco_ios,22,\nSW2,10.0.0.13,alcatel_aos,22,\n",
+    c2.download_button("⬇️ Plantilla CSV", "nombre,ip,vendor,puerto,usuario,sin_usuario\n"
+                       "SW1,10.0.0.1,Catalyst 9300,22,,\nSW2,10.0.0.2,Catalyst 2960,22,,si\n"
+                       "SW3,10.0.0.13,OS6860,22,,\n",
                        file_name="inventario_switches.csv", width="stretch")
     csv_file = c3.file_uploader("Importar inventario CSV (sin contraseñas)", type=["csv"],
                                 label_visibility="collapsed")
@@ -311,15 +324,16 @@ with tab_run:
                 key = vendor_from_text(r.get("vendor", ""))
                 if not key:
                     bad.append(r.get("ip", "?"))
-                recs.append({"Nombre": r.get("nombre", "") or r.get("name", ""),
-                             "IP": r.get("ip", "").strip(),
-                             "Vendor / OS": CHOICES.get(key or "cisco_ios"),
-                             "Puerto SSH": int(r.get("puerto", "") or 22),
-                             "Usuario (opcional)": r.get("usuario", "") or r.get("user", "")})
+                recs.append({"Nombre": clean_str(r.get("nombre", "") or r.get("name", "")),
+                             "IP": clean_str(r.get("ip", "")),
+                             "Vendor / OS": CHOICES.get(key or "cisco_xe"),
+                             "Puerto SSH": safe_int(r.get("puerto", ""), 22),
+                             "Usuario (opcional)": clean_str(r.get("usuario", "") or r.get("user", "")),
+                             "Sin usuario": truthy(r.get("sin_usuario", ""))})
             st.session_state.csv_loaded = csv_file.file_id
             new_table(table_from_records(recs))
             if bad:
-                st.session_state.csv_warning = ("Vendor no reconocido (se puso Cisco IOS, revísalo) en: "
+                st.session_state.csv_warning = ("Vendor no reconocido (se puso Cisco Catalyst IOS-XE, revísalo) en: "
                                                 + ", ".join(bad))
             st.rerun()
         except Exception as exc:
@@ -335,14 +349,23 @@ with tab_run:
             "IP": st.column_config.TextColumn(help="IP de gestión del switch", required=True),
             "Vendor / OS": st.column_config.SelectboxColumn(options=list(CHOICES.values()),
                                                             required=True, width="large",
-                                                            default=CHOICES["cisco_ios"]),
+                                                            default=CHOICES["cisco_xe"]),
             "Puerto SSH": st.column_config.NumberColumn(min_value=1, max_value=65535, step=1,
                                                         default=22),
             "Usuario (opcional)": st.column_config.TextColumn(
                 help="Solo si este switch usa un usuario distinto al común"),
+            "Sin usuario": st.column_config.CheckboxColumn(
+                help="Márcalo si el switch pide solo contraseña (no usa usuario)", default=False),
         })
-    rows_in = [r for r in edited.to_dict("records") if str(r.get("IP") or "").strip()
-               or str(r.get("Nombre") or "").strip()]
+    rows_in = []
+    for r in edited.to_dict("records"):
+        row = {"Nombre": clean_str(r.get("Nombre")), "IP": clean_str(r.get("IP")),
+               "Vendor / OS": clean_str(r.get("Vendor / OS")),
+               "Puerto SSH": safe_int(r.get("Puerto SSH"), 22),
+               "Usuario (opcional)": clean_str(r.get("Usuario (opcional)")),
+               "Sin usuario": truthy(r.get("Sin usuario"))}
+        if row["IP"] or row["Nombre"]:
+            rows_in.append(row)
 
     st.subheader("2 · Credenciales")
     st.caption("Las contraseñas no se guardan en ningún lado.")
@@ -351,23 +374,30 @@ with tab_run:
     common = {}
     per_switch: dict[int, dict] = {}
     if cred_mode == "Las mismas para todos":
+        common["no_user"] = st.checkbox(
+            "Sin usuario (los switches piden solo contraseña)", key="common_no_user",
+            help="Para equipos con solo password de línea/manager. También puedes marcarlo por "
+                 "switch en la columna «Sin usuario» de la tabla.")
         c4, c5, c6 = st.columns(3)
-        common["user"] = c4.text_input("Usuario")
+        common["user"] = c4.text_input("Usuario", disabled=common["no_user"],
+                                       placeholder="(sin usuario)" if common["no_user"] else "")
         common["password"] = c5.text_input("Contraseña", type="password")
         common["secret"] = c6.text_input("Enable password (si aplica)", type="password")
     else:
         if not rows_in:
             st.info("Primero agrega switches en la tabla.")
         for i, r in enumerate(rows_in):
-            label = r.get("Nombre") or f"Switch {i + 1}"
-            c4, c5, c6, c7 = st.columns([1.2, 1.2, 1.2, 1.2])
-            c4.markdown(f"**{label}**  \n`{r.get('IP') or 'sin IP'}`")
-            uid = f"{i}_{r.get('IP')}"
+            label = r["Nombre"] or f"Switch {i + 1}"
+            c4, c5, c6, c7, c8 = st.columns([1.2, 0.7, 1.2, 1.2, 1.2])
+            c4.markdown(f"**{label}**  \n`{r['IP'] or 'sin IP'}`")
+            uid = f"{i}_{r['IP']}"
+            no_user = c5.checkbox("Sin usuario", value=r["Sin usuario"], key=f"nu_{uid}")
             per_switch[i] = {
-                "user": c5.text_input("Usuario", value=r.get("Usuario (opcional)") or "",
-                                      key=f"u_{uid}"),
-                "password": c6.text_input("Contraseña", type="password", key=f"p_{uid}"),
-                "secret": c7.text_input("Enable", type="password", key=f"e_{uid}"),
+                "no_user": no_user,
+                "user": c6.text_input("Usuario", value=r["Usuario (opcional)"], key=f"u_{uid}",
+                                      disabled=no_user),
+                "password": c7.text_input("Contraseña", type="password", key=f"p_{uid}"),
+                "secret": c8.text_input("Enable", type="password", key=f"e_{uid}"),
             }
     with st.expander("🔑 Llave SSH privada (opcional, aplica a todos)"):
         key_upload = st.file_uploader("Archivo de llave (id_rsa, id_ed25519…)", key="key_up")
@@ -390,13 +420,18 @@ with tab_run:
     if go:
         errors, targets, seen = [], [], set()
         for i, r in enumerate(rows_in):
-            label = r.get("Nombre") or f"Switch {i + 1}"
-            ip = str(r.get("IP") or "").strip()
-            plat = LABEL_TO_KEY.get(r.get("Vendor / OS"))
-            creds = common if cred_mode == "Las mismas para todos" else per_switch.get(i, {})
-            user = str(r.get("Usuario (opcional)") or "").strip() \
-                if cred_mode == "Las mismas para todos" and str(r.get("Usuario (opcional)") or "").strip() \
-                else (creds.get("user") or "").strip()
+            label = r["Nombre"] or f"Switch {i + 1}"
+            ip = r["IP"]
+            plat = LABEL_TO_KEY.get(r["Vendor / OS"])
+            if cred_mode == "Las mismas para todos":
+                creds = common
+                no_user = common.get("no_user") or r["Sin usuario"]
+                user = r["Usuario (opcional)"] or common.get("user", "")
+            else:
+                creds = per_switch.get(i, {})
+                no_user = creds.get("no_user", False)
+                user = creds.get("user", "")
+            user = "" if no_user else user.strip()
             if not plat:
                 errors.append(f"{label}: elige el vendor / OS.")
             if not demo:
@@ -406,16 +441,16 @@ with tab_run:
                     errors.append(f"{label}: la IP «{ip}» no es válida.")
                 if ip in seen:
                     errors.append(f"{label}: la IP {ip} está repetida.")
-                if not user:
-                    errors.append(f"{label}: falta el usuario SSH.")
+                if not user and not no_user:
+                    errors.append(f"{label}: falta el usuario SSH (o marca «Sin usuario»).")
                 if not creds.get("password") and not key_upload:
                     errors.append(f"{label}: falta contraseña (o una llave SSH).")
             seen.add(ip)
-            targets.append(Target(host=ip or f"demo-{i + 1}", platform=plat or "cisco_ios",
+            targets.append(Target(host=ip or f"demo-{i + 1}", platform=plat or "cisco_xe",
                                   username=user, password=creds.get("password", ""),
-                                  secret=creds.get("secret", ""), port=int(r.get("Puerto SSH") or 22),
+                                  secret=creds.get("secret", ""), port=r["Puerto SSH"],
                                   key_passphrase=key_pass or None, timeout=int(timeout),
-                                  name=r.get("Nombre") or None))
+                                  name=r["Nombre"] or None, no_user=bool(no_user)))
         if errors:
             for e in errors:
                 st.error(e)
@@ -537,7 +572,7 @@ with tab_res:
         sel = st.session_state.get("selected_run")
         run = st.selectbox("Ejecución", runs, index=ids.index(sel) if sel in ids else 0,
                            format_func=run_label, key="res_run")
-        st.caption(f"Plataforma: {PLATFORMS[run['platform']].label} · Usuario: {run['username'] or '-'}"
+        st.caption(f"Plataforma: {platform_label(run['platform'])} · Usuario: {run['username'] or '-'}"
                    + (f" · Nota: {run['notes']}" if run.get("notes") else ""))
         if run["status"] == "error":
             st.error(run["error"])
@@ -698,7 +733,7 @@ with tab_hist:
         hist = pd.DataFrame([{
             "ID": r["id"], "Estado": RUN_STATUS.get(r["status"], r["status"]),
             "Switch": r.get("hostname") or "-", "IP": r["switch_ip"],
-            "Plataforma": PLATFORMS[r["platform"]].label,
+            "Plataforma": platform_label(r["platform"]),
             "Inicio": r["started_at"].replace("T", " "),
             "Puertos activos": r["summary"].get("puertos_activos"),
             "Hosts": r["summary"].get("hosts"), "Vecinos": r["summary"].get("vecinos_infra"),

@@ -6,7 +6,7 @@ import re
 from ..models import Interface, MacEntry, Neighbor, ParsedData, Vlan
 from ..utils import (IPV4, MAC_ANY, expand_vlan_list, mac_from_cisco_phone_name,
                      normalize_mac, normalize_port)
-from .common import (clean_mac_entries, first_ip, generic_arp, kv, normalize_caps,
+from .common import (Guard, clean_mac_entries, first_ip, generic_arp, kv, normalize_caps,
                      split_blocks, textfsm_macs, textfsm_parse, pick)
 
 STATUS_WORDS = {
@@ -245,20 +245,24 @@ def _textfsm_neighbors(platform: str, command: str, text: str, proto: str) -> li
 
 def parse(outputs: dict[str, str], platform: str) -> ParsedData:
     data = ParsedData()
+    g = Guard(data)
     cdp_text = outputs.get("neighbors_cdp", "")
     lldp_text = outputs.get("neighbors_lldp", "")
-    cdp = parse_cdp(cdp_text) or _textfsm_neighbors(platform, "show cdp neighbors detail",
-                                                    cdp_text, "CDP")
-    lldp = parse_lldp(lldp_text) or _textfsm_neighbors(platform, "show lldp neighbors detail",
-                                                       lldp_text, "LLDP")
+    cdp = g("show cdp neighbors detail", parse_cdp, cdp_text, default=[]) or \
+        g("CDP (TextFSM)", _textfsm_neighbors, platform, "show cdp neighbors detail", cdp_text,
+          "CDP", default=[])
+    lldp = g("show lldp neighbors detail", parse_lldp, lldp_text, default=[]) or \
+        g("LLDP (TextFSM)", _textfsm_neighbors, platform, "show lldp neighbors detail", lldp_text,
+          "LLDP", default=[])
     data.neighbors = cdp + lldp
-    data.macs = parse_mac(outputs.get("mac", ""), platform)
-    data.arp = generic_arp(outputs.get("arp", ""))
-    data.interfaces = parse_interfaces_status(outputs.get("interfaces", ""))
-    parse_trunks(outputs.get("trunks", ""), data.interfaces)
-    data.vlans = parse_vlans(outputs.get("vlans", ""))
-    parse_svis(outputs.get("svis", ""), data.vlans)
-    data.lags = parse_lags(outputs.get("lags", ""))
+    data.macs = g("tabla MAC", parse_mac, outputs.get("mac", ""), platform, default=[])
+    data.arp = g("tabla ARP", generic_arp, outputs.get("arp", ""), default=[])
+    data.interfaces = g("estado de puertos", parse_interfaces_status,
+                        outputs.get("interfaces", ""), default={})
+    g("trunks", parse_trunks, outputs.get("trunks", ""), data.interfaces)
+    data.vlans = g("VLANs", parse_vlans, outputs.get("vlans", ""), default={})
+    g("SVIs", parse_svis, outputs.get("svis", ""), data.vlans)
+    data.lags = g("port-channels", parse_lags, outputs.get("lags", ""), default={})
     if outputs.get("interfaces") and not data.interfaces:
         data.warnings.append("No se pudo interpretar el estado de puertos (show interfaces status).")
     return data

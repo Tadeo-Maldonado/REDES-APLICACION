@@ -277,3 +277,142 @@ def test_tree_layout_has_no_overlaps(db):
     core = pos["sw:sw-core-mty"]
     assert pos["nb:fw-palo-mty"][1] < core[1]                  # firewall arriba del core
     assert pos["sw:sw-acc-aruba-p1"][1] > core[1]              # acceso abajo
+
+
+# ------------------------------------------------ robustez (sin crasheos) ---
+import random
+import string
+
+from netorch.commands import PLATFORMS
+
+
+class FlakySession:
+    """Simula un switch problemático: comandos con timeout, salidas basura o caída de SSH."""
+
+    def __init__(self, target, mode="garbage"):
+        self.mode, self.calls, self.warnings = mode, 0, []
+
+    def send(self, command, slow=False):
+        self.calls += 1
+        if self.mode == "timeout" and self.calls % 2 == 0:
+            raise TimeoutError("Pattern not detected")
+        if self.mode == "drop" and self.calls == 3:
+            raise OSError("Socket is closed")
+        rnd = random.Random(command)
+        junk = "".join(rnd.choice(string.printable) for _ in range(800))
+        return junk + "\nGi1/0/1  0011.2233.4455  10.0.0.5 trunk | Yes Up\n\x00\x07"
+
+    def hostname(self):
+        return None
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("platform", list(PLATFORMS))
+@pytest.mark.parametrize("mode", ["garbage", "timeout", "drop"])
+def test_bad_devices_never_crash(db, platform, mode):
+    pid = db.create_project(f"p-{platform}-{mode}")
+    rid = run_collection(db, pid, Target(host="10.1.1.1", platform=platform, username="u",
+                                         name="SW-RARO"),
+                         ["show log"], session_factory=lambda t: FlakySession(t, mode))
+    run = db.get_run(rid)
+    assert run["status"] in ("ok", "error")
+    assert run["hostname"] == "SW-RARO"
+    if mode == "drop":
+        assert any("conexión" in w.lower() for w in run["warnings"]) or run["status"] == "error"
+
+
+@pytest.mark.parametrize("platform", list(PLATFORMS))
+def test_parsers_survive_empty_and_random_input(platform):
+    from netorch.parsers import parse_outputs
+    keys = list(PLATFORMS[platform].commands) + ["vlan_detail:10", "vlan_detail:x"]
+    for seed in range(15):
+        rnd = random.Random(seed)
+        outputs = {k: "".join(rnd.choice(string.printable + "|/:-") for _ in range(rnd.randint(0, 3000)))
+                   for k in keys}
+        data = parse_outputs(platform, outputs)
+        build_port_map(data)
+    build_port_map(parse_outputs(platform, {}))
+
+
+def test_reports_with_nothing_or_only_failures(db):
+    from netorch.report import build_report_data, export_files
+    pid = db.create_project("vacío")
+    rid = run_collection(db, pid, Target(host="10.9.9.9", platform="cisco_nxos", username="t"),
+                         [], session_factory=DemoSession)          # sin demo -> error
+    rd = build_report_data(db, [db.get_run(rid)], "vacío", "prueba")
+    files = export_files(db, rd)
+    assert b"No se pudo recolectar" in files["reporte.html"]
+    assert files["reporte.xlsx"][:2] == b"PK"
+    rd_empty = build_report_data(db, [], "nada", "prueba")
+    assert export_files(db, rd_empty)["reporte.html"]
+
+
+def test_excel_tolerates_control_characters(db):
+    from netorch.report import build_report_data, to_excel
+    pid = _project(db)
+    rd = build_report_data(db, db.latest_runs_per_switch(pid), "x", "y")
+    rd.runs_with_rows[0][1][0]["platform"] = "Desc\x00con\x07control\x1b"
+    assert to_excel(rd)[:2] == b"PK"
+
+
+def test_ring_topology_layout():
+    from netorch.topology import compute_layout
+    runs = [{"id": i, "hostname": f"SW{i}", "switch_ip": f"10.0.0.{i}", "platform": "cisco_xe",
+             "summary": {}, "started_at": "2026-01-01T00:00:00"} for i in (1, 2, 3)]
+    row = dict(category=CAT_INFRA, device_type="Switch", mac=None, method="LLDP", mac_count=0,
+               platform="", status="up", vlan="N:1 T:10")
+    links = {1: [(2, "1/1"), (3, "1/2")], 2: [(3, "1/3"), (1, "1/4")], 3: [(1, "1/5"), (2, "1/6")]}
+    data = [(runs[i - 1], [{**row, "port": p, "name": f"SW{j}", "ip": f"10.0.0.{j}",
+                            "remote_port": None} for j, p in links[i]]) for i in (1, 2, 3)]
+    g = build_graph(data)
+    assert len(g.nodes) == 3 and len(g.edges) == 3          # anillo: 3 enlaces, sin duplicados
+    pos = compute_layout(g)
+    assert len({(round(x), round(y)) for x, y in pos.values()}) == 3
+    assert render_html(build_graph([])).startswith("<!doctype html>")
+
+
+def test_platform_from_text_and_catalyst():
+    from netorch.commands import platform_from_text
+    assert platform_from_text("Catalyst 9300") == "cisco_xe"
+    assert platform_from_text("WS-C2960X") == "cisco_ios"
+    assert platform_from_text("Nexus 93180") == "cisco_nxos"
+    assert platform_from_text("OS6860E") == "alcatel_aos"
+    assert platform_from_text("") is None and platform_from_text(float("nan")) is None
+    run, ports = demo_run(_tmp_db(), 1, "cisco_xe", "10.0.0.1")
+    assert run["platform"] == "cisco_xe" and ports["Gi1/0/1"][0]["category"] == CAT_HOST
+
+
+def _tmp_db():
+    import tempfile
+    s = Storage(tempfile.mktemp(suffix=".db"))
+    s.create_project("x")
+    return s
+
+
+def test_no_user_target_and_fallback(monkeypatch):
+    """Sin usuario: se manda usuario vacío; si el servidor lo rechaza, se reintenta genérico."""
+    import netmiko
+    from netmiko.exceptions import NetmikoAuthenticationException
+    from netorch.engine import NetmikoSession, NO_USER_FALLBACK
+    calls = []
+
+    class FakeConn:
+        def find_prompt(self):
+            return "SW1#"
+
+        def disconnect(self):
+            pass
+
+    def fake_connect(**params):
+        calls.append(params["username"])
+        if params["username"] == "":
+            raise NetmikoAuthenticationException("empty user rejected")
+        return FakeConn()
+
+    monkeypatch.setattr(netmiko, "ConnectHandler", fake_connect)
+    s = NetmikoSession(Target(host="10.0.0.1", platform="cisco_ios", username="ignorado",
+                              password="x", no_user=True))
+    assert calls == ["", NO_USER_FALLBACK] and s.hostname() == "SW1"
+    assert any("usuario genérico" in w for w in s.warnings)

@@ -5,8 +5,10 @@ Aplicación en Python con interfaz gráfica que se conecta **por SSH a un solo s
 entrega un **mapeo limpio de lo que está conectado directamente**, sin el ruido de las
 tablas MAC/ARP globales. Todo se guarda **localmente** y organizado por **proyectos**.
 
-Vendors: **Cisco IOS/IOS-XE, Cisco NX-OS, Aruba AOS-S (ProCurve), Aruba AOS-CX y
-Alcatel-Lucent Enterprise AOS 6/8.**
+Vendors: **Cisco Catalyst IOS (2960, 3560, 3750, 4500…), Cisco Catalyst IOS-XE (3650, 3850,
+9200, 9300, 9400, 9500…), Cisco Nexus NX-OS, Aruba AOS-S / ProCurve, Aruba AOS-CX y
+Alcatel-Lucent Enterprise AOS 6/8 (OS6860, OS6900…).** Al importar un CSV, el vendor puede
+escribirse como modelo ("Catalyst 9300", "2960X", "Nexus 9k", "OS6860", "Aruba 6300"…).
 
 ## Inicio rápido
 
@@ -30,7 +32,7 @@ usando salidas de ejemplo, para explorar todas las vistas. También puedes marca
 | Sección | Contenido |
 |---|---|
 | **Proyectos** (barra lateral) | Crear, alternar y borrar proyectos. Cada proyecto acumula sus ejecuciones de forma aislada. |
-| **🚀 Nueva ejecución** | Tabla de **varios switches** (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
+| **🚀 Nueva ejecución** | Tabla de **varios switches** (con casilla **«Sin usuario»** para equipos que solo piden contraseña) (nombre, IP, vendor/OS, puerto, usuario opcional) que se ejecutan **en paralelo**, con progreso por equipo. Credenciales **comunes o distintas por switch**, enable, llave privada opcional y **Custom CLI** (se ejecuta en todos). Importa el inventario desde CSV (sin contraseñas). Si un switch falla, los demás siguen. |
 | **📑 Reporte** | Aparece solo al terminar cada ejecución y en su propia pestaña (proyecto completo, última tanda o una ejecución): métricas, **hallazgos con severidad y recomendación**, **diagrama de red** y **exportación**. |
 | **📋 Resultados por switch** | Las 4 capas: **Resumen ejecutivo** (switch + acumulado del proyecto), **Tabla consolidada de mapeo**, **Topología** interactiva y **Raw logs** (auditoría, descargables). Además VLANs/SVIs. |
 | **🗺️ Topología del proyecto** | Une la última ejecución de cada switch en un solo diagrama: si un switch escaneado aparece como vecino de otro, se "cosen" por IP de gestión o hostname. |
@@ -103,7 +105,7 @@ Detalles por vendor:
 
 ### Comandos por plataforma
 
-| Dato | Cisco IOS/XE | Cisco NX-OS | Aruba AOS-S | Aruba AOS-CX | Alcatel AOS 6/8 (OS6860) |
+| Dato | Cisco Catalyst IOS / IOS-XE | Cisco Nexus NX-OS | Aruba AOS-S | Aruba AOS-CX | Alcatel AOS 6/8 (OS6860) |
 |---|---|---|---|---|---|
 | Vecinos | `show cdp neighbors detail`, `show lldp neighbors detail` | igual | `show lldp info remote-device detail` | `show lldp neighbor-info detail` | `show lldp remote-system` |
 | MAC | `show mac address-table` | `show mac address-table` | `show mac-address` | `show mac-address-table` | `show mac-address-table` → `show mac-learning` (AOS 8) |
@@ -149,6 +151,24 @@ projects (id, name UNIQUE, description, created_at)
 
 Borrar un proyecto borra en cascada sus ejecuciones. Para usar otra base:
 `NETORCH_DB=/ruta/otra.db streamlit run app.py`.
+
+## Equipos sin usuario (solo contraseña)
+
+Marca **«Sin usuario»** en la tabla, en las credenciales comunes o por switch. La app se
+conecta por SSH con usuario vacío y la contraseña; si el servidor SSH del equipo no acepta un
+usuario vacío, reintenta una vez con un usuario genérico (los equipos que solo validan la
+contraseña lo ignoran).
+
+## Robustez
+
+- Cada comando se ejecuta aislado: si uno tarda demasiado o falla, se registra en Raw logs y
+  la recolección sigue. Los comandos pesados (MAC, ARP, vecinos) tienen más tiempo de espera.
+- Si la sesión SSH se cae a la mitad, se guarda lo que alcanzó a recolectarse (resultado
+  parcial con aviso) en lugar de perder toda la ejecución.
+- Cada sección del parseo está aislada: una salida inesperada genera una advertencia, no un
+  error. Las pruebas incluyen salidas aleatorias/basura para todas las plataformas.
+- En ejecución múltiple, un switch con problemas nunca detiene a los demás.
+- Si la sesión queda en modo usuario (`>`) en Cisco, se avisa para agregar el enable.
 
 ## Seguridad
 

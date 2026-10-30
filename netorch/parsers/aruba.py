@@ -4,8 +4,8 @@ from __future__ import annotations
 import re
 
 from ..models import Interface, MacEntry, Neighbor, ParsedData, Vlan
-from ..utils import IPV4, MAC_ANY, expand_vlan_list, normalize_mac
-from .common import (clean_mac_entries, tagging_mode, first_ip, generic_arp, kv, normalize_caps,
+from ..utils import MAC_ANY, expand_vlan_list, normalize_mac
+from .common import (Guard, clean_mac_entries, tagging_mode, first_ip, generic_arp, kv, normalize_caps,
                      split_blocks, textfsm_macs)
 
 
@@ -214,25 +214,30 @@ def parse_svis_cx(text: str, vlans: dict[int, Vlan]) -> None:
 # ------------------------------------------------------------------ entrada ---
 def parse(outputs: dict[str, str], platform: str) -> ParsedData:
     data = ParsedData()
-    data.arp = generic_arp(outputs.get("arp", ""))
+    g = Guard(data)
+    data.arp = g("tabla ARP", generic_arp, outputs.get("arp", ""), default=[])
     if platform == "aruba_aoscx":
-        data.neighbors = parse_lldp_cx(outputs.get("neighbors_lldp", ""))
-        data.macs = parse_mac_cx(outputs.get("mac", ""))
-        data.interfaces = parse_interfaces_cx(outputs.get("interfaces", ""))
-        apply_port_config_cx(outputs.get("port_config", ""), data.interfaces, data.lags)
-        data.vlans = parse_vlans_cx(outputs.get("vlans", ""))
-        parse_svis_cx(outputs.get("svis", ""), data.vlans)
+        data.neighbors = g("LLDP", parse_lldp_cx, outputs.get("neighbors_lldp", ""), default=[])
+        data.macs = g("tabla MAC", parse_mac_cx, outputs.get("mac", ""), default=[])
+        data.interfaces = g("estado de puertos", parse_interfaces_cx,
+                            outputs.get("interfaces", ""), default={})
+        g("configuración de puertos", apply_port_config_cx, outputs.get("port_config", ""),
+          data.interfaces, data.lags)
+        data.vlans = g("VLANs", parse_vlans_cx, outputs.get("vlans", ""), default={})
+        g("SVIs", parse_svis_cx, outputs.get("svis", ""), data.vlans)
     else:
-        data.neighbors = parse_lldp_aoss(outputs.get("neighbors_lldp", ""))
-        data.macs = parse_mac_aoss(outputs.get("mac", ""))
-        data.interfaces = parse_interfaces_aoss(outputs.get("interfaces", ""))
-        data.vlans = parse_vlans_aoss(outputs.get("vlans", ""))
+        data.neighbors = g("LLDP", parse_lldp_aoss, outputs.get("neighbors_lldp", ""), default=[])
+        data.macs = g("tabla MAC", parse_mac_aoss, outputs.get("mac", ""), default=[])
+        data.interfaces = g("estado de puertos", parse_interfaces_aoss,
+                            outputs.get("interfaces", ""), default={})
+        data.vlans = g("VLANs", parse_vlans_aoss, outputs.get("vlans", ""), default={})
         for key, text in outputs.items():
-            if key.startswith("vlan_detail:"):
-                apply_vlan_detail_aoss(int(key.split(":")[1]), text, data.interfaces)
+            if key.startswith("vlan_detail:") and key.split(":")[1].isdigit():
+                g(f"VLAN {key.split(':')[1]}", apply_vlan_detail_aoss, int(key.split(":")[1]),
+                  text, data.interfaces)
         for iface in data.interfaces.values():
             iface.tagged_vlans.sort()
             iface.mode = tagging_mode(iface)
-        parse_svis_aoss(outputs.get("svis", ""), data.vlans)
-        data.lags = parse_trunks_aoss(outputs.get("lags", ""))
+        g("SVIs", parse_svis_aoss, outputs.get("svis", ""), data.vlans)
+        data.lags = g("trunks (LAG)", parse_trunks_aoss, outputs.get("lags", ""), default={})
     return data

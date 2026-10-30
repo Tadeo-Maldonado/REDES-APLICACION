@@ -260,10 +260,18 @@ def compute_layout(g: Graph, unit: float = 118, level_gap: float = 170, row_gap:
 
 @lru_cache(maxsize=1)
 def _vis_assets() -> tuple[str, str]:
-    import pyvis
-    base = Path(pyvis.__file__).parent / "lib" / "vis-9.1.2"
-    return ((base / "vis-network.min.js").read_text(encoding="utf-8"),
-            (base / "vis-network.css").read_text(encoding="utf-8"))
+    """vis-network incluido en pyvis (funciona sin internet). Si no se encuentra, usa CDN."""
+    try:
+        import pyvis
+        base = Path(pyvis.__file__).parent
+        js = sorted(base.rglob("vis-network.min.js"), reverse=True)
+        if js:
+            css = js[0].with_name("vis-network.css")
+            return (js[0].read_text(encoding="utf-8"),
+                    css.read_text(encoding="utf-8") if css.exists() else "")
+    except Exception:
+        pass
+    return ("", "")
 
 
 def _safe(text) -> str:
@@ -280,6 +288,9 @@ def render_html(g: Graph, height: int = 650, dark: bool = False, title: str = ""
                 hierarchical: bool = True) -> str:
     """HTML autocontenido (funciona sin internet) con el diagrama interactivo."""
     js, css = _vis_assets()
+    vis_script = (f"<script>{js}</script>" if js else
+                  '<script src="https://unpkg.com/vis-network@9.1.2/standalone/umd/'
+                  'vis-network.min.js"></script>')
     fg, bg = ("#e2e8f0", "#0b1220") if dark else ("#0f172a", "#f8fafc")
     grid = "#1e293b" if dark else "#e2e8f0"
     muted = "#94a3b8" if dark else "#64748b"
@@ -390,7 +401,7 @@ def render_html(g: Graph, height: int = 650, dark: bool = False, title: str = ""
   <div id="net"></div>
   <div class="legend">{legend}</div>
 </div>
-<script>{js}</script>
+{vis_script}
 <script>
 (function(){{
   var nodes = new vis.DataSet({_js(nodes)});
