@@ -147,3 +147,23 @@ def test_bad_source_ip_gives_clear_error(tmp_path):
                                          timeout=3))
     run = db.get_run(rid)
     assert run["status"] == "error" and "origen 203.0.113.77" in run["error"]
+
+
+# --------------------------------------- SSH legacy (Cisco IOS clásico, SHA-1) --
+def test_legacy_algorithms_registered_last():
+    import netorch.engine  # noqa: F401  (activa la capa de compatibilidad)
+    from paramiko.transport import Transport
+    for k in ("diffie-hellman-group14-sha1", "diffie-hellman-group1-sha1",
+              "diffie-hellman-group-exchange-sha1"):
+        assert k in Transport._kex_info and k in Transport._preferred_kex
+    assert "ssh-rsa" in Transport._key_info
+    assert not Transport._preferred_kex[0].endswith("sha1")        # lo moderno va primero
+
+
+def test_incompatible_peer_message_is_not_called_timeout():
+    from netmiko.exceptions import NetmikoTimeoutException
+    from netorch.engine import _friendly_error
+    msg = _friendly_error(NetmikoTimeoutException(
+        "\nA paramiko SSHException occurred during connection creation:\n\n"
+        "Incompatible ssh peer (no acceptable kex algorithm)\n"))
+    assert "algoritmos" in msg and "Incompatible ssh peer" in msg and "Sin respuesta" not in msg

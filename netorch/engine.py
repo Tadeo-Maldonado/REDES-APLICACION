@@ -11,10 +11,12 @@ from .classifier import build_port_map, summarize
 from .commands import PLATFORMS
 from .parsers import parse_outputs
 from .parsers.aruba import parse_vlans_aoss
+from .sshcompat import enable_legacy_algorithms
 from .storage import Storage
 from .utils import looks_like_error
 
 log = logging.getLogger(__name__)
+enable_legacy_algorithms()      # switches con SSH viejo (SHA-1), como hace PuTTY
 MAX_VLAN_DETAIL = 128          # tope de "show vlans <id>" en AOS-S
 DEMO_DIR = Path(__file__).resolve().parent / "demo_data"
 
@@ -198,24 +200,48 @@ def _is_connection_lost(exc: Exception) -> bool:
                                    "socket closed", "channel closed"))
 
 
+def _real_message(exc: Exception) -> str:
+    """Netmiko envuelve el error de Paramiko en un texto largo: se extrae la línea útil."""
+    lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip()]
+    for ln in lines:
+        if not ln.lower().startswith(("a paramiko sshexception", "common causes", "device settings")) \
+                and not ln[:2].rstrip(".").isdigit():
+            return ln[:300]
+    return (lines[0] if lines else type(exc).__name__)[:300]
+
+
 def _friendly_error(exc: Exception) -> str:
+    """Mensaje claro + el error real del equipo (nunca se oculta la causa)."""
     name = type(exc).__name__
+    text = str(exc)
+    low = text.lower()
+    real = _real_message(exc)
     if isinstance(exc, ConnectionLost):
         return f"La conexión SSH se cayó antes de obtener datos: {exc}"
-    if "Authentication" in name:
-        return "Autenticación SSH fallida: revisa usuario, contraseña o llave."
-    low = str(exc).lower()
+    if "incompatible ssh peer" in low or "no acceptable" in low or "no matching" in low:
+        return ("El switch y la app no coinciden en los algoritmos de cifrado SSH (equipo con SSH "
+                f"muy antiguo o muy restringido). Detalle: {real}")
+    if "Authentication" in name or "authentication failed" in low:
+        return f"Autenticación SSH fallida: revisa usuario, contraseña, tipo de acceso o llave. ({real})"
     if "10049" in low or "assign requested address" in low:
         return ("La IP de origen elegida no pertenece a este equipo (¿se desconectó la VPN?). "
                 "Elige otra tarjeta o «Automática».")
     if "10051" in low or "unreachable" in low:
         return "No hay ruta hacia el switch: revisa que la VPN esté conectada."
-    if "Timeout" in name or "timed out" in low:
-        return ("Sin respuesta SSH (timeout): revisa IP, puerto, VPN, ACLs o firewall intermedio. "
+    if "tcp connection to device failed" in low or "timed out" in low and "tcp" in low:
+        return ("Sin respuesta TCP en el puerto SSH: revisa IP, puerto, VPN, ACLs o firewall. "
                 "Usa «🩺 Probar conectividad» para ver por qué IP sale la app.")
-    if "NoValidConnections" in name or "refused" in str(exc).lower():
+    if "error reading ssh protocol banner" in low:
+        return ("El puerto abre pero el switch no completó el saludo SSH a tiempo (equipo lento, "
+                "límite de sesiones VTY o ACL). Sube el timeout y reintenta. " f"({real})")
+    if "pattern not detected" in low or "prompt" in low or name == "ReadTimeout":
+        return ("Se inició sesión pero no se reconoció el prompt del switch (¿vendor/OS correcto? "
+                f"¿banner o menú al entrar?). Detalle: {real}")
+    if "NoValidConnections" in name or "refused" in low:
         return "Conexión rechazada: el puerto SSH no está abierto en el equipo."
-    return f"{name}: {exc}"
+    if "Timeout" in name:
+        return f"Tiempo de espera agotado durante la conexión SSH. Detalle: {real}"
+    return f"{name}: {real}"
 
 
 def run_collection(storage: Storage, project_id: int, target: Target,

@@ -181,6 +181,15 @@ guardada; si tu VPN hace *split tunnel* por aplicación, agrega `python.exe`; o 
 la IP de la VPN. En PowerShell, `Find-NetRoute -RemoteIPAddress <ip>` muestra la IP que usa
 Windows y `Test-NetConnection <ip> -Port 22` prueba el puerto.
 
+## Switches con SSH antiguo (Cisco IOS clásico)
+
+Paramiko 5 (la librería SSH) eliminó los algoritmos con SHA-1 que siguen usando muchos equipos
+(`SSH-2.0-Cisco-1.25`, Catalyst 2960/3560/3750, ProCurve y OmniSwitch antiguos). PuTTY sí los
+acepta. `netorch/sshcompat.py` los vuelve a habilitar (`diffie-hellman-group14-sha1`,
+`group1-sha1`, `group-exchange-sha1`, host key `ssh-rsa`) **solo como último recurso**: los
+equipos modernos siguen negociando algoritmos modernos. Verificado contra OpenSSH configurado
+únicamente con algoritmos legacy.
+
 ## Robustez
 
 - Cada comando se ejecuta aislado: si uno tarda demasiado o falla, se registra en Raw logs y

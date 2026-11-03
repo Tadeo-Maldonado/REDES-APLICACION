@@ -116,7 +116,8 @@ def probe(host: str, port: int = 22, timeout: float = 5.0, source_ip: str = AUTO
 def _diagnose(tcp: str, banner: str, src: str, forced: str, err: str, port: int) -> str:
     origin = f"desde {src}" if src else "sin ruta de origen"
     if tcp == "ok" and banner.startswith("SSH-"):
-        return f"✅ SSH responde {origin}. Si la recolección falla ahora, es por credenciales."
+        return (f"✅ SSH responde {origin}. Si la recolección falla, el error de la ejecución dice "
+                "la causa (credenciales, algoritmos SSH o prompt).")
     if tcp == "ok":
         return (f"⚠️ El puerto {port} abre {origin}, pero no contesta como SSH "
                 f"({banner or 'sin banner'}). ¿Es Telnet u otro servicio?")
