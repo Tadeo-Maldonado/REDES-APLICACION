@@ -108,6 +108,10 @@ class Storage:
         with self.conn() as c:
             c.execute("PRAGMA journal_mode = WAL")   # lecturas y escrituras concurrentes
             c.executescript(SCHEMA)
+            # Migraciones de bases creadas con versiones anteriores
+            cols = {r[1] for r in c.execute("PRAGMA table_info(port_rows)")}
+            if "mac_list" not in cols:
+                c.execute("ALTER TABLE port_rows ADD COLUMN mac_list TEXT")
 
     @contextmanager
     def conn(self) -> Iterator[sqlite3.Connection]:
@@ -167,10 +171,11 @@ class Storage:
                        json.dumps(warnings or []), error, run_id))
             for r in rows or []:
                 c.execute("""INSERT INTO port_rows(run_id, port, status, vlan, device_type, category,
-                             name, mac, ip, method, mac_count, remote_port, platform)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                             name, mac, ip, method, mac_count, remote_port, platform, mac_list)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (run_id, r.port, r.status, r.vlan, r.device_type, r.category, r.name,
-                           r.mac, r.ip, r.method, r.mac_count, r.remote_port, r.platform))
+                           r.mac, r.ip, r.method, r.mac_count, r.remote_port, r.platform,
+                           r.mac_list))
             for v in vlans or []:
                 c.execute("INSERT INTO vlans(run_id, vlan_id, name, svi_ip) VALUES (?,?,?,?)",
                           (run_id, v.vlan_id, v.name, v.svi_ip))

@@ -130,6 +130,9 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
                     iface_m.access_vlan = interfaces[lag_n].access_vlan
                     iface_m.tagged_vlans = list(interfaces[lag_n].tagged_vlans)
 
+    def mac_text(macs_set: set[str], limit: int = 500) -> Optional[str]:
+        return " ".join(sorted(macs_set)[:limit]) if len(macs_set) > 1 else None
+
     ports = (set(interfaces) | set(macs_by_port) | set(neigh_by_port) | set(lag_of)) - absorbed
     rows: list[PortRow] = []
 
@@ -167,6 +170,7 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
                     device_type=ntype, category=category, name=n.name,
                     mac=mac, ip=n.mgmt_ip or (ip_for(mac) if mac else None),
                     method=protos, mac_count=len(macs), remote_port=n.remote_port,
+                    mac_list=mac_text(macs),
                     platform=n.platform,
                 ))
             # PC detrás de un IP Phone: el teléfono + exactamente una MAC más
@@ -184,7 +188,8 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
         # 2) Sin protocolo de descubrimiento
         if mode == "routed":
             rows.append(PortRow(port=port, status=status, vlan=vlan, device_type="L3",
-                                category=CAT_ROUTED, mac_count=len(macs)))
+                                category=CAT_ROUTED, mac_count=len(macs),
+                                mac_list=mac_text(macs)))
         elif len(macs) == 1:
             mac = next(iter(macs))
             method = "Access MAC" if mode != "trunk" else "MAC única (puerto trunk/tagged)"
@@ -199,7 +204,7 @@ def build_port_map(data: ParsedData) -> list[PortRow]:
             rows.append(PortRow(port=port, status=status, vlan=vlan,
                                 device_type="No administrado", category=CAT_UNMANAGED,
                                 name=label, method="Conteo de MACs",
-                                mac_count=len(macs)))
+                                mac_count=len(macs), mac_list=mac_text(macs)))
         elif status == "up":
             cat = CAT_TRUNK_EMPTY if mode == "trunk" else CAT_UP_NO_MAC
             rows.append(PortRow(port=port, status=status, vlan=vlan, device_type="-",

@@ -17,6 +17,7 @@ from typing import Optional
 
 from .icons import LEGEND, icon_data_uri
 from .models import CAT_HOST, CAT_INFRA, CAT_UNMANAGED
+from .oui import vendor_for_row
 from .utils import short_hostname
 
 INFRA_KINDS = {"Escaneado", "Switch", "Router", "Firewall"}
@@ -116,9 +117,11 @@ def build_graph(runs_with_rows: list[tuple[dict, list[dict]]], show_hosts: bool 
                 kind = r["device_type"] if r["device_type"] in SIZES else "PC / Host"
                 main = display_name(r["name"]) if r["name"] and kind != "PC / Host" \
                     else (r["ip"] or r["mac"])
-                sub = r["mac"] if main == r["ip"] else (r["ip"] or "")
+                brand = vendor_for_row(r)
+                sub = brand if brand and brand != "—" else (r["mac"] if main == r["ip"] else (r["ip"] or ""))
                 g.node(nid, main, kind, sub=sub, title=(
                     f"{r['name'] or 'Host'}\nIP: {r['ip'] or 'sin ARP'}\nMAC: {r['mac']}\n"
+                    f"Fabricante (IEEE): {brand or '—'}\n"
                     f"Puerto: {r['port']} · VLAN {r['vlan']}\nDetección: {r['method']}"))
                 g.edge(sw_id, nid, r["port"], "leaf")
             elif r["category"] == CAT_UNMANAGED and show_unmanaged:
@@ -126,7 +129,8 @@ def build_graph(runs_with_rows: list[tuple[dict, list[dict]]], show_hosts: bool 
                 g.node(nid, "No administrado", "No administrado",
                        sub=f"{r['mac_count']} MACs",
                        title=f"Hub / switch no administrado en {r['port']}\n"
-                             f"{r['mac_count']} MACs sin CDP/LLDP · VLAN {r['vlan']}")
+                             f"{r['mac_count']} MACs sin CDP/LLDP · VLAN {r['vlan']}"
+                             + (f"\nFabricantes: {vendor_for_row(r)}" if r.get("mac_list") else ""))
                 g.edge(sw_id, nid, r["port"], "unmanaged")
     return g
 

@@ -74,6 +74,29 @@ Desde el reporte: **Reporte HTML** (autocontenido, con el diagrama interactivo),
 (+ CSV y raw logs). O **💾 Guardar en una carpeta** de tu equipo (por defecto
 `Documentos/NetOrch/<proyecto>/<fecha-hora>/`) con botón para abrirla.
 
+## Fabricante por MAC (registro oficial IEEE)
+
+Cada MAC se identifica con el **registro oficial del IEEE** (la autoridad que asigna los
+prefijos OUI): `e8:e7:32` → Alcatel-Lucent Enterprise, `bc:ad:28` → Hikvision, etc. Se usa el
+prefijo más largo (MA-S 36 bits → MA-M 28 → MA-L 24) y **no se adivina nada**:
+
+- Prefijo registrado → nombre oficial del IEEE + marca corta (y el rubro del fabricante para
+  marcas conocidas: red, seguridad, videovigilancia, telefonía, cómputo, impresión, UPS…).
+- MAC *administrada localmente* (bit 2 del primer byte: aleatoria por privacidad, VM o cambiada)
+  → «MAC local/aleatoria: sin fabricante».
+- Prefijo no registrado → se dice así.
+
+Dónde aparece: columna **Fabricante (IEEE)** en todas las tablas, Excel y reporte; el buscador
+global acepta marcas («hikvision»); en un hub/puerto no administrado se resume lo que hay
+detrás («5 Hikvision, 2 Dell»); tooltips del frente del switch y del diagrama; hallazgo
+«Hosts por fabricante». En la barra lateral, **🏷️ Fabricantes por MAC** permite consultar una
+MAC y **⟳ Actualizar desde IEEE** descarga los registros vigentes (MA-L, MA-M, MA-S, IAB) de
+standards-oui.ieee.org a `data/ieee_oui.tsv.gz`. La base incluida se regenera con
+`python tools/build_oui.py <archivos del IEEE>`.
+
+Ojo: el fabricante es el de la **tarjeta de red**, no siempre el de la marca del equipo (un
+servidor puede mostrar «Intel» o «Broadcom»). Por eso se muestra como «Fabricante (IEEE)».
+
 ## Lógica de filtrado (cero "info basura")
 
 Implementada en `netorch/classifier.py`, por puerto:
@@ -131,6 +154,8 @@ netorch/
   topology.py              Diagrama interactivo (vis-network) con layout de árbol propio
   icons.py                 Íconos SVG de los equipos
   findings.py              Hallazgos automáticos con severidad
+  oui.py                   Fabricante por MAC (registro IEEE) + actualizador
+  oui_data/                Base IEEE incluida (comprimida)
   report.py                Reporte HTML, Excel, ZIP y guardado en carpeta
   demo_data/               Salidas de ejemplo por plataforma (demo y pruebas)
 tests/                     Pruebas (pytest) con las salidas de ejemplo

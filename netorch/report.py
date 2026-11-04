@@ -15,6 +15,7 @@ from .analysis import enrich_with_project_arp
 from .commands import platform_label
 from .findings import SEVERITY_ICON, Finding, project_findings, severity_counts
 from .icons import icon_data_uri
+from .oui import vendor_for_row
 from .models import CAT_DOWN, CAT_HOST, CAT_INFRA, CAT_UNMANAGED
 from .storage import Storage
 from .topology import build_graph, render_html
@@ -22,8 +23,9 @@ from .topology import build_graph, render_html
 COLUMNS = {
     "switch": "Switch", "port": "Puerto", "status": "Estado", "vlan": "VLAN Native/Tagged",
     "device_type": "Tipo de Dispositivo", "name": "Vecino / Host Name", "mac": "Dirección MAC",
-    "ip": "Dirección IP", "method": "Método de Detección", "category": "Categoría",
-    "mac_count": "MACs en puerto", "remote_port": "Puerto remoto", "platform": "Plataforma / Descr.",
+    "vendor": "Fabricante (IEEE)", "ip": "Dirección IP", "method": "Método de Detección",
+    "category": "Categoría", "mac_count": "MACs en puerto", "remote_port": "Puerto remoto",
+    "platform": "Plataforma / Descr.",
 }
 STATUS_TXT = {"up": "Activo", "down": "Inactivo", "disabled": "Deshabilitado",
               "err-disabled": "Err-disabled", "unknown": "Desconocido"}
@@ -76,7 +78,8 @@ def mapping_df(rd: ReportData, include_down: bool = True) -> pd.DataFrame:
         for r in rows:
             if not include_down and r["category"] == CAT_DOWN:
                 continue
-            recs.append({**{k: r.get(k) for k in COLUMNS if k != "switch"}, "switch": sw_name(run)})
+            recs.append({**{k: r.get(k) for k in COLUMNS if k != "switch"},
+                         "vendor": vendor_for_row(r), "switch": sw_name(run)})
     df = pd.DataFrame(recs, columns=list(COLUMNS))
     df["status"] = df["status"].map(lambda s: STATUS_TXT.get(s, s))
     return df.rename(columns=COLUMNS)
@@ -196,7 +199,7 @@ def to_html(rd: ReportData) -> str:
             <span>VLANs <b>{s.get('vlans', 0)}</b> · SVIs <b>{s.get('svis', 0)}</b></span>
           </div>
           <table><thead><tr><th>Puerto</th><th>Estado</th><th>VLAN</th><th>Tipo</th>
-            <th>Vecino / Host</th><th>MAC</th><th>IP</th><th>Detección</th></tr></thead>
+            <th>Vecino / Host</th><th>MAC</th><th>Fabricante</th><th>IP</th><th>Detección</th></tr></thead>
             <tbody>{body}</tbody></table>
           <p class="note">{len(rows) - len(active)} puerto(s) inactivo(s) omitidos ·
             VLANs: {_e(vlan_txt) or '—'}</p>
@@ -276,6 +279,7 @@ def _row_html(r: dict) -> str:
              f'<img class="ic" src="{icon_data_uri(_kind_for(r))}"/>' + _e(r["device_type"]),
              _e(r["name"] or ""),
              '<span class="mono">' + _e(r["mac"] or "") + "</span>",
+             _e(vendor_for_row(r)),
              '<span class="mono">' + _e(r["ip"] or "") + "</span>",
              _e(r["method"] or "")]
     return f'<tr class="st-{_e(r["status"])}">' + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"

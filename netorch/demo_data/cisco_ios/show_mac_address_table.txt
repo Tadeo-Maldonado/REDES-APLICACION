@@ -14,11 +14,11 @@ Vlan    Mac Address       Type        Ports
   10    0050.56a1.0002    DYNAMIC     Gi1/0/2
   20    0025.6b4a.1f20    DYNAMIC     Gi1/0/2
   30    2047.da11.2233    DYNAMIC     Gi1/0/3
-  10    a4bb.6d00.0001    DYNAMIC     Gi1/0/4
-  10    a4bb.6d00.0002    DYNAMIC     Gi1/0/4
-  10    a4bb.6d00.0003    DYNAMIC     Gi1/0/4
-  10    a4bb.6d00.0004    DYNAMIC     Gi1/0/4
-  10    a4bb.6d00.0005    DYNAMIC     Gi1/0/4
+  10    bcad.2800.0001    DYNAMIC     Gi1/0/4
+  10    bcad.2800.0002    DYNAMIC     Gi1/0/4
+  10    bcad.2800.0003    DYNAMIC     Gi1/0/4
+  10    bcad.2800.0004    DYNAMIC     Gi1/0/4
+  10    bcad.2800.0005    DYNAMIC     Gi1/0/4
   40    0050.56a1.0005    DYNAMIC     Gi1/0/5
   10    001b.a9aa.bb01    DYNAMIC     Gi1/0/8
   99    b40c.25aa.0001    DYNAMIC     Gi1/0/45
@@ -31,7 +31,7 @@ Vlan    Mac Address       Type        Ports
   30    2047.da11.4455    DYNAMIC     Gi1/0/47
   10    0050.56d4.0001    DYNAMIC     Gi1/0/48
   10    0050.56d4.0002    DYNAMIC     Gi1/0/48
-  50    c8f7.50aa.0001    DYNAMIC     Te1/1/1
-  50    c8f7.50aa.0002    DYNAMIC     Te1/1/1
-  50    c8f7.50aa.0003    DYNAMIC     Te1/1/1
+  50    08ed.ed00.0001    DYNAMIC     Te1/1/1
+  50    08ed.ed00.0002    DYNAMIC     Te1/1/1
+  50    08ed.ed00.0003    DYNAMIC     Te1/1/1
 Total Mac Addresses for this criterion: 32

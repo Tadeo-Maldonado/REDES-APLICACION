@@ -88,6 +88,7 @@ class PortRow:
     mac_count: int = 0
     remote_port: Optional[str] = None
     platform: Optional[str] = None
+    mac_list: Optional[str] = None     # MACs del puerto (uplinks/no administrados), separadas por espacio
 
     def to_dict(self) -> dict:
         return asdict(self)

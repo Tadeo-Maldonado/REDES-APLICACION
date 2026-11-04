@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import re
 
+from .oui import vendor_for_row
 from .models import (CAT_DOWN, CAT_HOST, CAT_INFRA, CAT_LAG_MEMBER, CAT_ROUTED, CAT_TRUNK_EMPTY,
                      CAT_UNMANAGED, CAT_UP_NO_MAC)
 
@@ -60,10 +61,11 @@ def port_cells(rows: list[dict]) -> list[dict]:
         lines = [f"{port} · {main['status']} · VLAN {main['vlan'] or '-'}"]
         for r in items:
             if r["category"] in (CAT_INFRA, CAT_HOST):
-                lines.append(" · ".join(x for x in (r["device_type"], r["name"], r["ip"], r["mac"])
-                                        if x))
+                lines.append(" · ".join(x for x in (r["device_type"], r["name"], r["ip"], r["mac"],
+                                                    vendor_for_row(r)) if x))
             elif r["category"] == CAT_UNMANAGED:
-                lines.append(f"No administrado: {r['mac_count']} MACs")
+                lines.append(f"No administrado: {r['mac_count']} MACs"
+                             + (f" ({vendor_for_row(r)})" if r.get("mac_list") else ""))
             elif r["category"] != CAT_DOWN:
                 lines.append(r["category"])
         short = port.split("/")[-1] if "/" in port else re.sub(r"^[A-Za-z]+", "", port) or port

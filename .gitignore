@@ -7,3 +7,6 @@ venv/
 data/*.db
 data/*.db-journal
 .streamlit/secrets.toml
+
+# Base de fabricantes actualizada desde el IEEE en este equipo
+data/ieee_oui.tsv.gz

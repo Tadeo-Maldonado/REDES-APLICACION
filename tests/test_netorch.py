@@ -433,3 +433,50 @@ def test_faceplate_one_cell_per_physical_port(db):
     assert html.count('class="fp-p"') == len(cells) and "<script" not in html
     evil = [{**rows[0], "name": '"><img src=x onerror=alert(1)>'}]
     assert "<img" not in render_faceplate(evil)
+
+
+# ------------------------------------------------- fabricantes por MAC (IEEE) --
+def test_oui_lookup_official_registry():
+    from netorch.oui import lookup, summarize_vendors
+    v = lookup("e8:e7:32:11:22:33")
+    assert v.status == "ieee" and v.vendor == "Alcatel-Lucent Enterprise"
+    assert lookup("E8-E7-32-AA-BB-CC").brand == "Alcatel-Lucent Enterprise"   # cualquier formato
+    assert lookup("bcad.2800.0001").brand == "Hikvision"
+    assert lookup("00:09:0f:00:00:01").brand == "Fortinet"
+    assert lookup("b4:0c:25:00:00:01").brand == "Palo Alto Networks"
+    assert lookup("da:a1:19:00:00:01").status == "local"          # aleatoria: sin fabricante
+    assert lookup("nada").status == "invalid"
+    assert lookup("00:50:c2:f7:10:01").vendor == "RF Code"         # bloque IAB (36 bits)
+    assert summarize_vendors(["bc:ad:28:00:00:01", "bc:ad:28:00:00:02", "da:a1:19:00:00:01"]) \
+        == "2 Hikvision, 1 MAC local"
+
+
+def test_brand_rules_have_no_false_positives():
+    from netorch.oui import brand_of
+    assert brand_of("INTELLICOM, INC.")[0] != "Intel"
+    assert brand_of("Dell'Orto S.P.A.")[0] != "Dell"
+    assert brand_of("Juniper Systems")[0] != "Juniper"
+    assert brand_of("WatchGuard Video")[0] != "WatchGuard"
+    assert brand_of("PELCOMBE GROUP LTD.")[0] != "Pelco"
+
+
+def test_hub_shows_vendors_behind_it(db):
+    from netorch.oui import vendor_for_row
+    pid = db.create_project("p")
+    run, ports = demo_run(db, pid, "cisco_ios", "10.0.0.1")
+    hub = ports["Gi1/0/4"][0]
+    assert hub["category"] == CAT_UNMANAGED and len(hub["mac_list"].split()) == 5
+    assert vendor_for_row(hub) == "5 Hikvision"
+
+
+def test_old_database_gets_mac_list_column(tmp_path):
+    import sqlite3
+    from netorch.storage import SCHEMA
+    path = tmp_path / "vieja.db"
+    c = sqlite3.connect(path)
+    c.executescript(SCHEMA)            # esquema de versiones anteriores: sin mac_list
+    assert "mac_list" not in {r[1] for r in c.execute("PRAGMA table_info(port_rows)")}
+    c.commit(); c.close()
+    Storage(path)
+    cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(port_rows)")}
+    assert "mac_list" in cols

@@ -9,6 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 
 from .models import CAT_HOST, CAT_INFRA, CAT_UNMANAGED, CAT_UP_NO_MAC
+from .oui import summarize_vendors
 from .utils import short_hostname
 
 SEVERITY_ORDER = {"Alta": 0, "Media": 1, "Baja": 2, "Info": 3}
@@ -49,6 +50,11 @@ def _ports_list(rows: list[dict], extra=None, limit: int = 12) -> str:
     return ", ".join(items[:limit]) + more
 
 
+def _macs_with_vendors(r: dict) -> str:
+    vendors = summarize_vendors((r.get("mac_list") or "").split()) if r.get("mac_list") else ""
+    return f"{r['mac_count']} MACs" + (f": {vendors}" if vendors else "")
+
+
 def switch_findings(run: dict, rows: list[dict]) -> list[Finding]:
     sw = _sw_name(run)
     out: list[Finding] = []
@@ -63,7 +69,7 @@ def switch_findings(run: dict, rows: list[dict]) -> list[Finding]:
             f"{len(unm_access)} puerto(s) de acceso con varias MACs y sin CDP/LLDP",
             "Detrás de estos puertos hay un hub, un switch no administrado o un equipo que no "
             "anuncia CDP/LLDP. Son puntos ciegos: no se ve qué hay conectado y pueden causar loops.",
-            sw, _ports_list(unm_access, lambda r: f"{r['mac_count']} MACs"),
+            sw, _ports_list(unm_access, _macs_with_vendors),
             "Identificar físicamente el equipo; reemplazarlo por uno administrado o habilitar LLDP. "
             "Activar BPDU Guard / loop-protect en puertos de acceso."))
     if unm_trunk:
@@ -72,7 +78,7 @@ def switch_findings(run: dict, rows: list[dict]) -> list[Finding]:
             f"{len(unm_trunk)} trunk(s) con tráfico pero sin vecino CDP/LLDP",
             "El puerto lleva varias VLANs y aprende MACs, pero el equipo del otro lado no se "
             "identifica. Suele ser un switch con LLDP apagado o de otro fabricante.",
-            sw, _ports_list(unm_trunk, lambda r: f"{r['mac_count']} MACs"),
+            sw, _ports_list(unm_trunk, _macs_with_vendors),
             "Habilitar LLDP en ambos extremos y documentar el enlace."))
 
     errd = [r for r in rows if r["status"] == "err-disabled"]
@@ -223,6 +229,14 @@ def project_findings(runs_with_rows: list[tuple[dict, list[dict]]],
             "", "", "Puede ser un equipo que se movió entre ejecuciones, un switch no administrado "
                     "entre ambos puertos o un loop. Comparar ejecuciones y revisar físicamente."))
 
+    # Inventario de hosts por fabricante (registro IEEE)
+    host_macs = {r["mac"] for _, rows in runs_with_rows for r in rows
+                 if r["category"] == CAT_HOST and r["mac"]}
+    if host_macs:
+        out.append(Finding(
+            "Info", "Inventario", f"Hosts por fabricante ({len(host_macs)} hosts)",
+            summarize_vendors(host_macs, limit=12) + ". Fabricante según el registro oficial "
+            "del IEEE; «MAC local» = MAC aleatoria o virtual (sin fabricante).", "", ""))
     out = _merge_info(out)
     out.sort(key=lambda f: (SEVERITY_ORDER[f.severity], f.category, f.switch))
     return out

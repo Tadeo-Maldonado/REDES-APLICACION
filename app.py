@@ -24,6 +24,9 @@ from netorch.report import (build_report_data, default_export_dir, export_files,
 from netorch.commands import platform_choices, platform_from_text, platform_label
 from netorch.engine import DemoSession, NetmikoSession, Target, run_many
 from netorch.netdiag import AUTO, local_interfaces, probe_many
+from netorch.oui import db_info as oui_db_info
+from netorch.oui import lookup, update_from_ieee, vendor_for_row
+from netorch.oui import lookup as oui_lookup
 from netorch.models import CAT_DOWN
 from netorch.storage import DEFAULT_DB, Storage
 from netorch.utils import normalize_mac
@@ -37,6 +40,7 @@ RUN_STATUS = {"ok": "✅", "error": "❌", "running": "⏳"}
 TABLE_COLUMNS = {
     "port": "Puerto", "status": "Estado", "vlan": "VLAN Native/Tagged",
     "device_type": "Tipo de Dispositivo", "name": "Vecino / Host Name", "mac": "Dirección MAC",
+    "vendor": "Fabricante (IEEE)", "segment": "Rubro del fabricante",
     "ip": "Dirección IP", "method": "Método de Detección", "category": "Categoría",
     "mac_count": "MACs en puerto", "remote_port": "Puerto remoto", "platform": "Plataforma / Descr.",
 }
@@ -68,7 +72,9 @@ def run_label(r: dict) -> str:
 def rows_df(rows: list[dict], with_switch: bool = False) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=list(TABLE_COLUMNS.values()))
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame([{**r, "vendor": vendor_for_row(r),
+                        "segment": lookup(r.get("mac")).segment if r.get("mac") else ""}
+                       for r in rows])
     cols = (["switch"] if with_switch else []) + list(TABLE_COLUMNS)
     df = df[[c for c in cols if c in df.columns]].copy()
     df["status"] = df["status"].map(lambda s: STATUS_LABEL.get(s, s))
@@ -237,6 +243,32 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
+    with st.expander("🏷️ Fabricantes por MAC (IEEE)"):
+        info = oui_db_info()
+        st.caption(f"{info.get('entries', 0):,} prefijos oficiales del IEEE · {info.get('date', '?')}"
+                   + (" · actualizada por ti" if info.get("user_updated") else " · incluida con la app"))
+        mac_q = st.text_input("Consultar una MAC", placeholder="e8:e7:32:aa:bb:cc", key="oui_q")
+        if mac_q.strip():
+            v = oui_lookup(mac_q)
+            if v.status == "invalid":
+                st.warning("No es una MAC válida.")
+            elif v.status == "ieee":
+                st.success(f"**{v.brand}**" + (f" · {v.segment}" if v.segment else "")
+                           + f"  \nIEEE: {v.vendor}")
+            else:
+                st.info(v.vendor)
+        if st.button("⟳ Actualizar desde IEEE", width="stretch",
+                     help="Descarga los registros oficiales MA-L, MA-M, MA-S e IAB "
+                          "(standards-oui.ieee.org). Requiere internet en este equipo."):
+            try:
+                with st.spinner("Descargando registros del IEEE…"):
+                    res = update_from_ieee()
+                st.success(f"Base actualizada: {res['total']:,} prefijos "
+                           f"(MA-L {res['MA-L']:,} · MA-M {res['MA-M']:,} · MA-S {res['MA-S']:,} · "
+                           f"IAB {res['IAB']:,}).")
+            except Exception as exc:
+                st.error(f"No se pudo actualizar (¿sin internet o proxy?): {exc}. "
+                         "Se sigue usando la base actual.")
     st.caption(f"💾 Base local: `{db.path}`")
 
 pid = project["id"]
@@ -630,8 +662,9 @@ def project_snapshot(pid: int):
 def row_matches(r: dict, text: str, mac_norm: str | None) -> bool:
     if mac_norm and r.get("mac") == mac_norm:
         return True
-    hay = " ".join(str(r.get(k) or "") for k in ("port", "name", "ip", "mac", "vlan",
-                                                  "device_type", "platform")).lower()
+    hay = " ".join([str(r.get(k) or "") for k in ("port", "name", "ip", "mac", "vlan",
+                                                   "device_type", "platform")]
+                   + [vendor_for_row(r), lookup(r.get("mac")).vendor if r.get("mac") else ""]).lower()
     compact = hay.replace(":", "").replace(".", "").replace("-", "")
     t = text.lower()
     return t in hay or (len(t) >= 4 and t.replace(":", "").replace(".", "").replace("-", "") in compact)
@@ -688,7 +721,7 @@ with tab_over:
 
         # Buscador global: ¿dónde está esta MAC / IP / equipo?
         q = st.text_input("🔎 Buscar en todos los switches", key="global_search",
-                          placeholder="MAC (cualquier formato), IP, nombre, puerto o VLAN…")
+                          placeholder="MAC (cualquier formato), IP, nombre, puerto, VLAN o fabricante (p. ej. hikvision)…")
         if q.strip():
             mac_norm = normalize_mac(q)
             hits = [r for r in all_rows if row_matches(r, q.strip(), mac_norm)]
